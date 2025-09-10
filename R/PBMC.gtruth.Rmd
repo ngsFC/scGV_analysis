@@ -1,0 +1,430 @@
+---
+title: "scGraphVerse PBMC Data and Ground Truth"
+author: "Francesco Cecere"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    theme: cerulean
+    df_print: paged
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r}
+knitr::opts_knit$set(root.dir = "../data", 
+  warning = FALSE, 
+  message = FALSE, 
+  error = FALSE)
+```
+
+## Load Libraries
+
+```{r load-libraries}
+
+#library(biomaRt)
+#library(DT)
+#library(tidyverse)
+#library(Seurat)
+#library(STRINGdb)
+
+library(scGraphVerse)
+library(igraph)
+library(ggraph)
+```
+
+## Load Atlas Data
+
+```{r Download Seurat Object}
+options(timeout = 600)
+
+# PBMC Dataset: from www.singlecellatlas.org - scRNAseq, Adult, Cardiovascular system, Blood, PBMC
+seurat_url <- "https://www.dropbox.com/s/gz1ezn6awt0x8j3/SCA_scRNASEQ_TISSUE_PBMC.RDS?dl=1"
+#seurat_url <- "https://cellgeni.cog.sanger.ac.uk/cvidcellatlas/cohort1.rds"
+
+seurat_object <- download_Atlas(seurat_url)
+
+table(seurat_object@meta.data$CELL_TYPE, seurat_object@meta.data$SAMPLE_ID)
+table(seurat_object@meta.data$SAMPLE_ID)
+table(seurat_object@meta.data$CELL_TYPE)
+
+#seurat_subset <- subset(
+#  x = seurat_object,
+#  subset = CELL_TYPE == "B_cell" & SAMPLE_ID %in% c("GSM4008638_Adult-Peripheral-Blood1_PBMC", "GSM4008641_Adult-Peripheral-Blood3-2_PBMC", #"GSM4008644_Adult-Peripheral-Blood4-3_PBMC")
+#)
+
+seurat_subset <- subset(
+  x = seurat_object,
+  subset = CELL_TYPE == "B_cell" & SAMPLE_ID %in% c("GSM5073064_CHD1_PBMC", "GSM5073066_CHD3_PBMC", "GSM5073068_CHD5_PBMC"
+))
+
+```
+
+## Adjacency matrix p500
+
+```{r Generate Adjacency matrice}
+pathgenes <- selgene(object = seurat_object, 
+                     top_n = 1200,
+                     cell_type = "B_cell",
+                     cell_type_col = "CELL_TYPE",
+                     remove_rib = TRUE,
+                     remove_mt = TRUE
+                     )
+
+options(timeout = 2000)
+result <- stringdb_adjacency(
+  genes          = pathgenes,
+  species        = 9606,
+  required_score = 900,
+  keep_all_genes = F
+)
+
+wadj_truth <- result$weighted
+adj_truth <- result$binary
+adj_truth <- adj_truth[order(rownames(adj_truth)), order(colnames(adj_truth))]
+
+write.table(adj_truth, "../data/adjacency/adjm_p500.txt", sep = "\t", quote = FALSE, col.names = TRUE, row.names = TRUE)
+write.table(wadj_truth, "../data/adjacency/wadjm_p500.txt", sep = "\t", quote = FALSE, col.names = TRUE, row.names = TRUE)
+
+set.seed(221725)
+gtruth <- graph_from_adjacency_matrix(adj_truth, mode = "undirected")
+p1 <- ggraph(gtruth, layout = "fr") +
+    geom_edge_link(color = "gray") +
+    geom_node_point(color = "steelblue") +
+    ggtitle(paste0(
+        "Ground Truth: ",
+        vcount(gtruth),
+        " nodes, ",
+        ecount(gtruth),
+        " edges"
+    )) +
+    theme_minimal()
+
+ggsave("../output/gtruth_p500.png", p1, width = 8, height = 6, dpi = 300, bg = "white")
+
+```
+
+
+```{r}
+# Simulation parameters
+nodes <- nrow(adj_truth)
+sims <- zinb_simdata(
+    n = 100,
+    p = nodes,
+    B = adj_truth,
+    mu_range = list(c(1, 4), c(1, 7), c(1, 10)),
+    mu_noise = c(1, 3, 5),
+    theta = c(1, 0.7, 0.5),
+    pi = c(0.2, 0.2, 0.2),
+    kmat = 3,
+    depth_range = c(round(0.8 * nodes * 3), round(1.2 * nodes * 3))
+)
+# Transpose to cells × genes
+count_matrices <- lapply(sims, t)
+
+saveRDS(count_matrices, "../data/simdata/sim_n100p500.RDS")
+
+sims <- zinb_simdata(
+    n = 100,
+    p = nodes,
+    B = adj_truth,
+    mu_range = list(c(1, 4), c(1, 7), c(1, 10), c(1, 12), c(1, 15)),
+    mu_noise = c(1, 3, 5, 6, 7),
+    theta = c(1, 0.7, 0.5, 0.3, 0.2),
+    pi = c(0.2, 0.2, 0.2, 0.2, 0.2),
+    kmat = 5,
+    depth_range = c(round(0.8 * nodes * 3), round(1.2 * nodes * 3))
+)
+# Transpose to cells × genes
+count_matrices <- lapply(sims, t)
+
+saveRDS(count_matrices, "../data/simdata/sim_n100p500k5.RDS")
+
+sims <- zinb_simdata(
+    n = 500,
+    p = nodes,
+    B = adj_truth,
+    mu_range = list(c(1, 4), c(1, 7), c(1, 10)),
+    mu_noise = c(1, 3, 5),
+    theta = c(1, 0.7, 0.5),
+    pi = c(0.2, 0.2, 0.2),
+    kmat = 3,
+    depth_range = c(round(0.8 * nodes * 3), round(1.2 * nodes * 3))
+)
+# Transpose to cells × genes
+count_matrices <- lapply(sims, t)
+
+saveRDS(count_matrices, "../data/simdata/sim_n500p500.RDS")
+
+```
+
+
+## Adjacency matrix p200
+
+```{r Generate Adjacency matrice}
+pathgenes <- selgene(object = seurat_object, 
+                     top_n = 600,
+                     cell_type = "B_cell",
+                     cell_type_col = "CELL_TYPE",
+                     remove_rib = TRUE,
+                     remove_mt = TRUE
+                     )
+pathgenes1 <- pathgenes
+options(timeout = 2000)
+result <- stringdb_adjacency(
+  genes          = pathgenes,
+  species        = 9606,
+  required_score = 900,
+  keep_all_genes = F
+)
+
+wadj_truth <- result$weighted
+adj_truth <- result$binary
+adj_truth <- adj_truth[order(rownames(adj_truth)), order(colnames(adj_truth))]
+dim(adj_truth)
+
+write.table(adj_truth, "../data/adjacency/adjm_p200.txt", sep = "\t", quote = FALSE, col.names = TRUE, row.names = TRUE)
+write.table(wadj_truth, "../data/adjacency/wadjm_p200.txt", sep = "\t", quote = FALSE, col.names = TRUE, row.names = TRUE)
+
+set.seed(221725)
+gtruth <- graph_from_adjacency_matrix(adj_truth, mode = "undirected")
+p1 <- ggraph(gtruth, layout = "fr") +
+    geom_edge_link(color = "gray") +
+    geom_node_point(color = "steelblue") +
+    ggtitle(paste0(
+        "Ground Truth: ",
+        vcount(gtruth),
+        " nodes, ",
+        ecount(gtruth),
+        " edges"
+    )) +
+    theme_minimal()
+
+ggsave("../output/gtruth_p200.png", p1, width = 8, height = 6, dpi = 300, bg = "white")
+
+```
+
+
+```{r}
+# Simulation parameters
+nodes <- nrow(adj_truth)
+sims <- zinb_simdata(
+    n = 100,
+    p = nodes,
+    B = adj_truth,
+    mu_range = list(c(1, 4), c(1, 7), c(1, 10)),
+    mu_noise = c(1, 3, 5),
+    theta = c(1, 0.7, 0.5),
+    pi = c(0.2, 0.2, 0.2),
+    kmat = 3,
+    depth_range = c(round(0.8 * nodes * 3), round(1.2 * nodes * 3))
+)
+# Transpose to cells × genes
+count_matrices <- lapply(sims, t)
+
+saveRDS(count_matrices, "../data/simdata/sim_n100p200.RDS")
+
+sims <- zinb_simdata(
+    n = 500,
+    p = nodes,
+    B = adj_truth,
+    mu_range = list(c(1, 4), c(1, 7), c(1, 10)),
+    mu_noise = c(1, 3, 5),
+    theta = c(1, 0.7, 0.5),
+    pi = c(0.2, 0.2, 0.2),
+    kmat = 3,
+    depth_range = c(round(0.8 * nodes * 3), round(1.2 * nodes * 3))
+)
+# Transpose to cells × genes
+count_matrices <- lapply(sims, t)
+
+saveRDS(count_matrices, "../data/simdata/sim_n500p200.RDS")
+
+```
+
+
+## Adjacency matrix p100
+
+```{r Generate Adjacency matrice}
+pathgenes <- selgene(object = seurat_object, 
+                     top_n = 300,
+                     cell_type = "B_cell",
+                     cell_type_col = "CELL_TYPE",
+                     remove_rib = TRUE,
+                     remove_mt = TRUE
+                     )
+
+options(timeout = 2000)
+result <- stringdb_adjacency(
+  genes          = pathgenes,
+  species        = 9606,
+  required_score = 900,
+  keep_all_genes = F
+)
+
+wadj_truth <- result$weighted
+adj_truth <- result$binary
+adj_truth <- adj_truth[order(rownames(adj_truth)), order(colnames(adj_truth))]
+dim(adj_truth)
+
+write.table(adj_truth, "../data/adjacency/adjm_p100.txt", sep = "\t", quote = FALSE, col.names = TRUE, row.names = TRUE)
+write.table(wadj_truth, "../data/adjacency/wadjm_p100.txt", sep = "\t", quote = FALSE, col.names = TRUE, row.names = TRUE)
+
+set.seed(221725)
+gtruth <- graph_from_adjacency_matrix(adj_truth, mode = "undirected")
+p1 <- ggraph(gtruth, layout = "fr") +
+    geom_edge_link(color = "gray") +
+    geom_node_point(color = "steelblue") +
+    ggtitle(paste0(
+        "Ground Truth: ",
+        vcount(gtruth),
+        " nodes, ",
+        ecount(gtruth),
+        " edges"
+    )) +
+    theme_minimal()
+
+ggsave("../output/gtruth_p100.png", p1, width = 8, height = 6, dpi = 300, bg = "white")
+
+```
+
+
+```{r}
+# Simulation parameters
+nodes <- nrow(adj_truth)
+sims <- zinb_simdata(
+    n = 100,
+    p = nodes,
+    B = adj_truth,
+    mu_range = list(c(1, 4), c(1, 7), c(1, 10)),
+    mu_noise = c(1, 3, 5),
+    theta = c(1, 0.7, 0.5),
+    pi = c(0.2, 0.2, 0.2),
+    kmat = 3,
+    depth_range = c(round(0.8 * nodes * 3), round(1.2 * nodes * 3))
+)
+# Transpose to cells × genes
+count_matrices <- lapply(sims, t)
+
+saveRDS(count_matrices, "../data/simdata/sim_n100p100.RDS")
+
+sims <- zinb_simdata(
+    n = 500,
+    p = nodes,
+    B = adj_truth,
+    mu_range = list(c(1, 4), c(1, 7), c(1, 10)),
+    mu_noise = c(1, 3, 5),
+    theta = c(1, 0.7, 0.5),
+    pi = c(0.2, 0.2, 0.2),
+    kmat = 3,
+    depth_range = c(round(0.8 * nodes * 3), round(1.2 * nodes * 3))
+)
+# Transpose to cells × genes
+count_matrices <- lapply(sims, t)
+
+saveRDS(count_matrices, "../data/simdata/sim_n500p100.RDS")
+
+```
+
+
+## Adjacency matrix p700
+
+```{r Generate Adjacency matrice}
+pathgenes <- selgene(object = seurat_object, 
+                     top_n = 1500,
+                     cell_type = "B_cell",
+                     cell_type_col = "CELL_TYPE",
+                     remove_rib = TRUE,
+                     remove_mt = TRUE
+                     )
+
+options(timeout = 2000)
+result <- stringdb_adjacency(
+  genes          = pathgenes,
+  species        = 9606,
+  required_score = 900,
+  keep_all_genes = F
+)
+
+wadj_truth <- result$weighted
+adj_truth <- result$binary
+adj_truth <- adj_truth[order(rownames(adj_truth)), order(colnames(adj_truth))]
+dim(adj_truth)
+
+write.table(adj_truth, "../data/adjacency/adjm_p700.txt", sep = "\t", quote = FALSE, col.names = TRUE, row.names = TRUE)
+write.table(wadj_truth, "../data/adjacency/wadjm_p700.txt", sep = "\t", quote = FALSE, col.names = TRUE, row.names = TRUE)
+
+set.seed(221725)
+gtruth <- graph_from_adjacency_matrix(adj_truth, mode = "undirected")
+p1 <- ggraph(gtruth, layout = "fr") +
+    geom_edge_link(color = "gray") +
+    geom_node_point(color = "steelblue") +
+    ggtitle(paste0(
+        "Ground Truth: ",
+        vcount(gtruth),
+        " nodes, ",
+        ecount(gtruth),
+        " edges"
+    )) +
+    theme_minimal()
+
+ggsave("../output/gtruth_p700.png", p1, width = 8, height = 6, dpi = 300, bg = "white")
+
+```
+
+
+```{r}
+# Simulation parameters
+nodes <- nrow(adj_truth)
+sims <- zinb_simdata(
+    n = 100,
+    p = nodes,
+    B = adj_truth,
+    mu_range = list(c(1, 4), c(1, 7), c(1, 10)),
+    mu_noise = c(1, 3, 5),
+    theta = c(1, 0.7, 0.5),
+    pi = c(0.2, 0.2, 0.2),
+    kmat = 3,
+    depth_range = c(round(0.8 * nodes * 3), round(1.2 * nodes * 3))
+)
+# Transpose to cells × genes
+count_matrices <- lapply(sims, t)
+
+saveRDS(count_matrices, "../data/simdata/sim_n100p700.RDS")
+
+sims <- zinb_simdata(
+    n = 500,
+    p = nodes,
+    B = adj_truth,
+    mu_range = list(c(1, 4), c(1, 7), c(1, 10)),
+    mu_noise = c(1, 3, 5),
+    theta = c(1, 0.7, 0.5),
+    pi = c(0.2, 0.2, 0.2),
+    kmat = 3,
+    depth_range = c(round(0.8 * nodes * 3), round(1.2 * nodes * 3))
+)
+# Transpose to cells × genes
+count_matrices <- lapply(sims, t)
+
+saveRDS(count_matrices, "../data/simdata/sim_n500p700.RDS")
+
+```
+
+
+## Split data for donor_id
+
+```{r format control Seurat data}
+genes_to_keep <- intersect(pathgenes1, rownames(seurat_subset))
+seurat_subset_filt_case <- subset(seurat_subset, features = genes_to_keep)
+seurat_subset_filt_case@assays$RNA@counts <- as.matrix(seurat_subset_filt_case@assays$RNA@counts)
+
+saveRDS(seurat_subset_filt_case, "../data/PBMC.top600.RDS")
+
+ncells_case <- as.matrix(seurat_subset_filt_case@assays$RNA@counts)
+#ncells_case <- ncells_case[rownames(adj_truth),]
+
+mean(colSums(ncells_case))
+```
+

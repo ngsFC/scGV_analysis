@@ -1,0 +1,40 @@
+# R files
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Generated outputs (optional - remove if you want to track them)
+*.html
+*.pdf
+
+# Large data files (uncomment if you don't want to track large files)
+# data/simdata/*.RDS
+# data/PBMC.top600.RDS
+
+# Results directories (uncomment to ignore results)
+# data/results/
+# output/plots/
+# output/tables/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Temporary files
+*~
+*.swp
+*.swo
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Log files
+*.log
