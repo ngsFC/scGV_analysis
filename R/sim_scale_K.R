@@ -1,4 +1,4 @@
-#' Simplified k-progressive simulation function 
+#' Improved k-progressive simulation function 
 #' 
 #' @param count_matrices_dir Path to directory containing count matrices (.RDS files) OR a list of count matrices
 #' @param adjm_file Path to adjacency matrix file (.txt format)
@@ -12,16 +12,15 @@
 #' 
 #' @return List with summary and detailed results across all k values
 run_k_progressive_study <- function(count_matrices_dir,
-                                   adjm_file, 
-                                   max_k = NULL,
-                                   n_runs = 10,
-                                   n_cores = 15,
-                                   genes_on_rows = TRUE,
-                                   quantile_threshold = 0.99,
-                                   output_file = NULL,
-                                   verbose = TRUE) {
+                                    adjm_file, 
+                                    max_k = NULL,
+                                    n_runs = 10,
+                                    n_cores = 15,
+                                    genes_on_rows = TRUE,
+                                    quantile_threshold = 0.99,
+                                    output_file = NULL,
+                                    verbose = TRUE) {
   
-  # Load required libraries
   suppressPackageStartupMessages({
     library(tidyverse)
     library(scGraphVerse)
@@ -31,7 +30,6 @@ run_k_progressive_study <- function(count_matrices_dir,
     library(tools)
   })
   
-  # Initialize Python environment for GRNBoost2
   modules <- init_py(python_path = "/usr/bin/python3", required = TRUE)
   
   # Validate and load data
@@ -56,12 +54,10 @@ run_k_progressive_study <- function(count_matrices_dir,
     stop("count_matrices_dir must be either a directory path or a list of matrices")
   }
   
-  # Handle gene orientation
   if (!genes_on_rows) {
     count_matrices <- lapply(count_matrices, t)
   }
   
-  # Determine max_k
   total_matrices <- length(count_matrices)
   if (is.null(max_k)) {
     max_k <- total_matrices
@@ -74,7 +70,6 @@ run_k_progressive_study <- function(count_matrices_dir,
   adjm <- as.matrix(read.table(adjm_file))
   colnames(adjm) <- rownames(adjm)
   
-  # Calculate metrics
   n_genes <- nrow(adjm)
   n_cells <- ncol(count_matrices[[1]])
   ratio <- n_genes / n_cells
@@ -82,16 +77,60 @@ run_k_progressive_study <- function(count_matrices_dir,
   if (verbose) {
     cat("=== K-Progressive Study ===\n")
     cat("Testing k values: 1 to", max_k, "\n")
-    cat("Genes:", n_genes, "| Cells:", n_cells, "| Runs per k:", n_runs, "\n\n")
+    cat("Genes:", n_genes, "| Cells:", n_cells, "| Runs per k:", n_runs, "\n")
+    cat("Note: JRF will only be tested for k >= 2 (requires multiple datasets)\n\n")
   }
   
   # Ground truth community
   adj_comm <- community_path(adjm, plot = FALSE, verbose = FALSE, genes_path = Inf)
   
-  # Storage for all results
   all_results <- list()
   
-  # Helper function to add community metrics safely
+  # Helper function for single analysis
+  run_single_method <- function(matrices, method, method_modules = NULL) {
+    timing <- system.time({
+      networks <- infer_networks(matrices, method = method, 
+                                 grnboost_modules = method_modules, 
+                                 nCores = n_cores)
+    })
+    
+    wadj <- generate_adjacency(networks)
+    sym_wadj <- symmetrize(wadj, weight_function = "mean")
+    binary_adj <- cutoff_adjacency(matrices, sym_wadj, n = 2, method = method, 
+                                   grnboost_modules = method_modules,
+                                   nCores = n_cores, 
+                                   quantile_threshold = quantile_threshold, 
+                                   debug = FALSE)
+    
+    scores <- pscores(adjm, binary_adj)$Statistics %>%
+      mutate(Method = method, 
+             Time_seconds = timing["elapsed"],
+             Time_minutes = timing["elapsed"] / 60)
+    
+    scores <- add_community_metrics(scores, binary_adj)
+    
+    return(list(scores = scores, binary_adj = binary_adj, sym_wadj = sym_wadj))
+  }
+  
+  # other helpers
+  create_consensus_scores <- function(binary_adj_list, sym_wadj_list, method_name, timing) {
+    consensus_vote <- create_consensus(binary_adj_list, method = "vote")
+    consensus_union <- create_consensus(binary_adj_list, method = "union")
+    consensus_inet <- create_consensus(binary_adj_list, sym_wadj_list, 
+                                       method = "INet", threshold = 0.05, ncores = n_cores)
+    
+    scores <- pscores(adjm, list(consensus_vote, consensus_union, consensus_inet))$Statistics %>%
+      mutate(Method = method_name, 
+             Predicted_Matrix = c("vote", "union", "inet"),
+             Integration = "late",
+             Time_seconds = timing["elapsed"],
+             Time_minutes = timing["elapsed"] / 60)
+    
+    scores <- add_community_metrics(scores, list(consensus_vote, consensus_union, consensus_inet))
+    
+    return(scores)
+  }
+  
   add_community_metrics <- function(scores_df, consensus_matrices) {
     tryCatch({
       communities <- lapply(consensus_matrices, function(mat) {
@@ -99,7 +138,6 @@ run_k_progressive_study <- function(count_matrices_dir,
       })
       topscore <- community_similarity(adj_comm, communities)
       
-      # Add missing columns
       required_cols <- c("VI", "NMI", "ARI", "Modularity", "Communities", "Density", "Transitivity")
       for (col in required_cols) {
         if (!col %in% colnames(scores_df)) {
@@ -107,7 +145,6 @@ run_k_progressive_study <- function(count_matrices_dir,
         }
       }
       
-      # Add topology measures
       if (!is.null(topscore$topology_measures) && nrow(topscore$topology_measures) > 0) {
         for (i in 1:min(nrow(topscore$topology_measures), nrow(scores_df))) {
           scores_df$Modularity[i] <- topscore$topology_measures$Modularity[i]
@@ -117,7 +154,6 @@ run_k_progressive_study <- function(count_matrices_dir,
         }
       }
       
-      # Add community metrics
       if (!is.null(topscore$community_metrics) && nrow(topscore$community_metrics) > 0) {
         for (i in 1:min(nrow(topscore$community_metrics), nrow(scores_df))) {
           scores_df$VI[i] <- topscore$community_metrics$VI[i]
@@ -132,7 +168,7 @@ run_k_progressive_study <- function(count_matrices_dir,
     return(scores_df)
   }
   
-  # Main loop
+  # Main loop over k values
   for (k in 1:max_k) {
     if (verbose) cat(glue("=== Testing k = {k} ===\n"))
     
@@ -142,199 +178,114 @@ run_k_progressive_study <- function(count_matrices_dir,
     for (run_id in 1:n_runs) {
       if (verbose) cat(glue("K={k}, Run={run_id}/{n_runs}\n"))
       
-      timing <- list()
       all_scores <- tibble()
       
-      # === k=1: Special case ===
       if (k == 1) {
+        # === K=1: Only single-dataset methods (GENIE3, GRNBoost2) ===
         
         # GENIE3
-        timing[["GENIE3"]] <- system.time({
-          networks <- infer_networks(current_matrices, method = "GENIE3", nCores = n_cores)
-        })
-        wadj <- generate_adjacency(networks)
-        sym_wadj <- symmetrize(wadj, weight_function = "mean")
-        binary_adj <- cutoff_adjacency(current_matrices, sym_wadj, n = 1, method = "GENIE3", nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
-        
-        scores <- pscores(adjm, binary_adj)$Statistics %>%
-          mutate(Method = "GENIE3", Predicted_Matrix = "single")
-        scores <- add_community_metrics(scores, binary_adj)
-        
-        # Duplicate as early and late
-        genie3_scores <- bind_rows(
-          scores %>% mutate(Predicted_Matrix = "early"),
-          scores %>% mutate(Predicted_Matrix = "late")
-        )
+        genie3_result <- run_single_method(current_matrices, "GENIE3")
+        genie3_scores <- genie3_result$scores %>%
+          mutate(Integration = "single", Predicted_Matrix = "single")
         all_scores <- bind_rows(all_scores, genie3_scores)
         
         # GRNBoost2
-        timing[["GRNBoost2"]] <- system.time({
-          networks <- infer_networks(current_matrices, method = "GRNBoost2", grnboost_modules = modules, nCores = n_cores)
-        })
-        wadj <- generate_adjacency(networks)
-        sym_wadj <- symmetrize(wadj, weight_function = "mean")
-        binary_adj <- cutoff_adjacency(current_matrices, sym_wadj, n = 1, method = "GRNBoost2", grnboost_modules = modules, nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
-        
-        scores <- pscores(adjm, binary_adj)$Statistics %>%
-          mutate(Method = "GRNBoost2", Predicted_Matrix = "single")
-        scores <- add_community_metrics(scores, binary_adj)
-        
-        # Duplicate as early and late
-        grnboost_scores <- bind_rows(
-          scores %>% mutate(Predicted_Matrix = "early"),
-          scores %>% mutate(Predicted_Matrix = "late")
-        )
+        grnboost_result <- run_single_method(current_matrices, "GRNBoost2", modules)
+        grnboost_scores <- grnboost_result$scores %>%
+          mutate(Integration = "single", Predicted_Matrix = "single")
         all_scores <- bind_rows(all_scores, grnboost_scores)
         
-      } else {
-        # === k>1: Full analysis ===
+        # JRF is NOT run for k=1 
+        if (verbose) cat("JRF skipped for k=1 (requires multiple datasets)\n")
         
+      } else {
+        # === K>1: All methods including multi-dataset strategies ===
+        
+        # Prepare early matrix
         early_matrix <- list(earlyj(current_matrices, rowg = TRUE))
         
-        # GENIE3
-        # Late integration
-        timing[["GENIE3_late"]] <- system.time({
+        # GENIE3 - Late integration
+        timing_genie3_late <- system.time({
           networks <- infer_networks(current_matrices, method = "GENIE3", nCores = n_cores)
         })
         wadj <- generate_adjacency(networks)
         sym_wadj <- symmetrize(wadj, weight_function = "mean")
-        binary_adj <- cutoff_adjacency(current_matrices, sym_wadj, n = 3, method = "GENIE3", nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
+        binary_adj <- cutoff_adjacency(current_matrices, sym_wadj, n = 3, method = "GENIE3", 
+                                       nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
         
-        consensus_vote <- create_consensus(binary_adj, method = "vote")
-        consensus_union <- create_consensus(binary_adj, method = "union")
-        consensus_inet <- create_consensus(binary_adj, sym_wadj, method = "INet", threshold = 0.05, ncores = n_cores)
+        genie3_late_scores <- create_consensus_scores(binary_adj, sym_wadj, "GENIE3", timing_genie3_late)
+        all_scores <- bind_rows(all_scores, genie3_late_scores)
         
-        scores <- pscores(adjm, list(consensus_vote, consensus_union, consensus_inet))$Statistics %>%
-          mutate(Method = "GENIE3", Predicted_Matrix = c("vote", "union", "inet"))
-        scores <- add_community_metrics(scores, list(consensus_vote, consensus_union, consensus_inet))
-        all_scores <- bind_rows(all_scores, scores)
+        # GENIE3 - Early integration
+        genie3_early_result <- run_single_method(early_matrix, "GENIE3")
+        genie3_early_scores <- genie3_early_result$scores %>%
+          mutate(Integration = "early", Predicted_Matrix = "early")
+        all_scores <- bind_rows(all_scores, genie3_early_scores)
         
-        # Early integration
-        timing[["GENIE3_early"]] <- system.time({
-          networks <- infer_networks(early_matrix, method = "GENIE3", nCores = n_cores)
+        # GRNBoost2 - Late integration
+        timing_grnboost_late <- system.time({
+          networks <- infer_networks(current_matrices, method = "GRNBoost2", 
+                                     grnboost_modules = modules, nCores = n_cores)
         })
         wadj <- generate_adjacency(networks)
         sym_wadj <- symmetrize(wadj, weight_function = "mean")
-        binary_adj <- cutoff_adjacency(early_matrix, sym_wadj, n = 2, method = "GENIE3", nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
+        binary_adj <- cutoff_adjacency(current_matrices, sym_wadj, n = 3, method = "GRNBoost2", 
+                                       grnboost_modules = modules, nCores = n_cores, 
+                                       quantile_threshold = quantile_threshold, debug = FALSE)
         
-        scores <- pscores(adjm, binary_adj)$Statistics %>%
-          mutate(Method = "GENIE3", Predicted_Matrix = "early")
-        scores <- add_community_metrics(scores, binary_adj)
-        all_scores <- bind_rows(all_scores, scores)
+        grnboost_late_scores <- create_consensus_scores(binary_adj, sym_wadj, "GRNBoost2", timing_grnboost_late)
+        all_scores <- bind_rows(all_scores, grnboost_late_scores)
         
-        # GRNBoost2
-        # Late integration
-        timing[["GRNBoost2_late"]] <- system.time({
-          networks <- infer_networks(current_matrices, method = "GRNBoost2", grnboost_modules = modules, nCores = n_cores)
-        })
-        wadj <- generate_adjacency(networks)
-        sym_wadj <- symmetrize(wadj, weight_function = "mean")
-        binary_adj <- cutoff_adjacency(current_matrices, sym_wadj, n = 3, method = "GRNBoost2", grnboost_modules = modules, nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
+        # GRNBoost2 - Early integration
+        grnboost_early_result <- run_single_method(early_matrix, "GRNBoost2", modules)
+        grnboost_early_scores <- grnboost_early_result$scores %>%
+          mutate(Integration = "early", Predicted_Matrix = "early")
+        all_scores <- bind_rows(all_scores, grnboost_early_scores)
         
-        consensus_vote <- create_consensus(binary_adj, method = "vote")
-        consensus_union <- create_consensus(binary_adj, method = "union")
-        consensus_inet <- create_consensus(binary_adj, sym_wadj, method = "INet", threshold = 0.05, ncores = n_cores)
-        
-        scores <- pscores(adjm, list(consensus_vote, consensus_union, consensus_inet))$Statistics %>%
-          mutate(Method = "GRNBoost2", Predicted_Matrix = c("vote", "union", "inet"))
-        scores <- add_community_metrics(scores, list(consensus_vote, consensus_union, consensus_inet))
-        all_scores <- bind_rows(all_scores, scores)
-        
-        # Early integration
-        timing[["GRNBoost2_early"]] <- system.time({
-          networks <- infer_networks(early_matrix, method = "GRNBoost2", grnboost_modules = modules, nCores = n_cores)
-        })
-        wadj <- generate_adjacency(networks)
-        sym_wadj <- symmetrize(wadj, weight_function = "mean")
-        binary_adj <- cutoff_adjacency(early_matrix, sym_wadj, n = 2, method = "GRNBoost2", grnboost_modules = modules, nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
-        
-        scores <- pscores(adjm, binary_adj)$Statistics %>%
-          mutate(Method = "GRNBoost2", Predicted_Matrix = "early")
-        scores <- add_community_metrics(scores, binary_adj)
-        all_scores <- bind_rows(all_scores, scores)
-        
-        # JRF
+        # JRF - Joint modeling (only for k >= 2)
         jrf_scores <- tibble(
           Predicted_Matrix = c("vote", "union", "inet"),
-          Method = "JRF",
+          Method = "JRF", Integration = "joint",
           TP = 0, TN = 0, FP = 0, FN = 0,
           TPR = 0, FPR = 0, Precision = 0, F1 = 0, MCC = 0,
           VI = NA_real_, NMI = NA_real_, ARI = NA_real_,
           Modularity = NA_real_, Communities = NA_real_,
-          Density = NA_real_, Transitivity = NA_real_
+          Density = NA_real_, Transitivity = NA_real_,
+          Time_seconds = NA_real_, Time_minutes = NA_real_
         )
         
-        timing[["JRF"]] <- system.time({
+        timing_jrf <- system.time({
           tryCatch({
             networks <- infer_networks(current_matrices, method = "JRF", nCores = n_cores)
-            
-            # Process JRF
             if (!is.null(networks) && length(networks) > 0 && !is.null(networks[[1]])) {
-              importance_cols <- grep("importance", names(networks[[1]]), value = TRUE)
+              wadj <- generate_adjacency(networks)
+              sym_wadj <- symmetrize(wadj, weight_function = "mean")
+              binary_adj <- cutoff_adjacency(current_matrices, sym_wadj, n = 3, method = "JRF", 
+                                             nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
               
-              if (length(importance_cols) >= k) {
-                # Use first k importance columns
-                jrf_list <- lapply(importance_cols[1:k], function(col) {
-                  df <- networks[[1]][, c("gene1", "gene2", col)]
-                  colnames(df)[3] <- col
-                  df
-                })
-                
-                wadj <- generate_adjacency(jrf_list)
-                sym_wadj <- symmetrize(wadj, weight_function = "mean")
-                binary_adj <- cutoff_adjacency(current_matrices, sym_wadj, n = 3, method = "JRF", nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
-                
-                consensus_vote <- create_consensus(binary_adj, method = "vote")
-                consensus_union <- create_consensus(binary_adj, method = "union")
-                consensus_inet <- create_consensus(binary_adj, sym_wadj, method = "INet", threshold = 0.1, ncores = n_cores)
-                
-                scores <- pscores(adjm, list(consensus_vote, consensus_union, consensus_inet))$Statistics %>%
-                  mutate(Method = "JRF", Predicted_Matrix = c("vote", "union", "inet"))
-                scores <- add_community_metrics(scores, list(consensus_vote, consensus_union, consensus_inet))
-                
-                jrf_scores <- scores
-              }
+              jrf_scores <- create_consensus_scores(binary_adj, sym_wadj, "JRF", timing_jrf) %>%
+                mutate(Integration = "joint")
             }
           }, error = function(e) {
             if (verbose) cat("JRF failed:", e$message, "\n")
           })
         })
         
-        # ALWAYS add JRF (even if failed)
         all_scores <- bind_rows(all_scores, jrf_scores)
       }
       
-      # Add timing and metadata
-      timing_df <- tibble(
-        Method_Integration = names(timing),
-        Time_seconds = sapply(timing, function(x) x["elapsed"])
-      ) %>%
-        separate(Method_Integration, into = c("Method", "Integration"), sep = "_", fill = "right") %>%
-        mutate(Integration = case_when(
-          is.na(Integration) ~ ifelse(k == 1, "single", "joint"),
-          TRUE ~ Integration
-        ))
-      
+      # Add metadata to all scores
       all_scores <- all_scores %>%
         mutate(
           k = k,
           Run = run_id,
           Ratio = ratio,
           p = n_genes,
-          Integration = case_when(
-            k == 1 ~ "single",
-            Method == "JRF" ~ "joint",
-            Predicted_Matrix == "early" ~ "early",
-            Predicted_Matrix %in% c("vote", "union", "inet") ~ "late",
-            TRUE ~ "unknown"
-          )
-        ) %>%
-        left_join(timing_df, by = c("Method", "Integration")) %>%
-        mutate(Time_minutes = Time_seconds / 60)
+          n_cells = n_cells
+        )
       
       k_results[[run_id]] <- all_scores
       
-      # Cleanup
       BiocParallel::bpstop(BiocParallel::bpparam())
       if (run_id < n_runs) Sys.sleep(1)
     }
@@ -343,16 +294,21 @@ run_k_progressive_study <- function(count_matrices_dir,
     if (verbose) cat(glue("Completed k = {k}\n\n"))
   }
   
-  # Combine and summarize
+  # Combine and summarize results
   final_df <- bind_rows(all_results, .id = "k")
   final_df$k <- as.numeric(final_df$k)
   
   summary_df <- final_df %>%
-    group_by(k, Method, Predicted_Matrix) %>%
-    summarise(across(where(is.numeric), list(mean = mean, sd = sd), .names = "{.col}_{.fn}"), .groups = "drop") %>%
-    arrange(k, Method, Predicted_Matrix)
+    group_by(k, Method, Integration, Predicted_Matrix) %>%
+    summarise(
+      across(where(is.numeric) & !matches("k|Run"), 
+             list(mean = ~mean(.x, na.rm = TRUE), 
+                  sd = ~sd(.x, na.rm = TRUE)), 
+             .names = "{.col}_{.fn}"), 
+      .groups = "drop"
+    ) %>%
+    arrange(k, Method, Integration, Predicted_Matrix)
   
-  # Save results
   if (!is.null(output_file)) {
     write.table(final_df, file = output_file, sep = "\t", quote = FALSE, row.names = FALSE)
     if (verbose) cat("Results saved to:", output_file, "\n")
@@ -360,8 +316,11 @@ run_k_progressive_study <- function(count_matrices_dir,
   
   if (verbose) {
     cat("\n=== Study Completed ===\n")
-    cat("Methods found in results:\n")
-    print(table(final_df$Method, final_df$k))
+    cat("Methods and integrations tested:\n")
+    method_summary <- final_df %>%
+      count(k, Method, Integration) %>%
+      arrange(k, Method, Integration)
+    print(method_summary)
   }
   
   return(list(
@@ -371,19 +330,24 @@ run_k_progressive_study <- function(count_matrices_dir,
       max_k = max_k,
       n_runs = n_runs,
       n_genes = n_genes,
-      n_cells = n_cells
+      n_cells = n_cells,
+      methods_by_k = final_df %>% 
+        distinct(k, Method, Integration) %>% 
+        arrange(k, Method, Integration)
     )
   ))
 }
 
-count_mat <- readRDS("../data/simdata/sim_n100p500k5.RDS")
-results <- run_k_progressive_study(
-   count_matrices_dir = count_mat,
-   adjm_file = "../data/adjacency/adjm_p500.txt",
-   max_k = 5, 
-   n_runs = 10,
-   genes_on_rows = TRUE,
-   n_cores = 15,
-   verbose = TRUE,
-   output_file = "../data/results/sim_n100p500k5_summary.txt"
- )
+# Example
+# count_mat <- readRDS("path/sim_n100p500k5.RDS")
+# results <- run_k_progressive_study(
+#  count_matrices_dir = count_mat,
+#  adjm_file = "path/adjm_p500.txt",
+#  max_k = 5, 
+#  n_runs = 10,
+#  genes_on_rows = TRUE,
+#  n_cores = 15,
+#  verbose = TRUE,
+#  output_file = "path/sim_n100p500k5_summary.txt"
+# )
+
