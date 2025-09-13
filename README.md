@@ -10,7 +10,7 @@ scGV_analysis/
 │   ├── PBMC.gtruth.Rmd        # Data generation and ground truth creation
 │   ├── case_study_JRF.Rmd     # Real data case study analysis
 │   ├── sim_scale_np.R         # Simulation study: scaling by nodes (n) and genes (p)
-│   └── sim_scale_K.R          # Simulation study: scaling by cluster number (K)
+│   └── sim_scale_K.R          # Simulation study: scaling by datasets (K)
 ├── data/                       # Data storage
 │   ├── adjacency/             # Ground truth adjacency matrices
 │   ├── simdata/               # Simulated count matrices
