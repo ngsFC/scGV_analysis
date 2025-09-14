@@ -24,21 +24,20 @@ knitr::opts_chunk$set(
   dpi = 300,
   fig.retina = 2
 )
-knitr::opts_knit$set(root.dir = "../data")
+knitr::opts_knit$set(root.dir = "~/Desktop/scGraphVerse/")
 ```
 
 # Abstract
 
-This analysis demonstrates the application of Joint Random Forest (JRF) for inferring gene regulatory networks from single-cell RNA-seq data of peripheral blood mononuclear cells (PBMCs). We utilize the scGraphVerse package to construct consensus networks, identify functional communities, and perform pathway enrichment analysis.
+This analysis demonstrates the application of scGraphVerse package for inferring gene regulatory networks from scRNA-seq data of peripheral blood mononuclear cells (PBMCs). 
 
 # Introduction
 
-Gene regulatory networks (GRNs) provide crucial insights into cellular function and disease mechanisms. Single-cell RNA sequencing enables the reconstruction of these networks at unprecedented resolution. Here, we apply the Joint Random Forest methodology to infer robust gene regulatory networks from PBMC data.
+Gene regulatory networks (GRNs) provide crucial insights into cellular function and disease mechanisms. scRNA-seq enables the reconstruction of these networks at unprecedented resolution. Here, we apply the Joint Random Forest (JRF) algorithm to infer robust GRNs from PBMC data.
 
 ## Load Libraries and Data
 
 ```{r libraries, message=FALSE, warning=FALSE}
-# Core libraries
 library(RColorBrewer)
 library(DT)
 library(scGraphVerse)
@@ -48,15 +47,12 @@ library(viridis)
 library(patchwork)
 library(scales)
 
-# Visualization libraries
 library(tidygraph)
 library(ggraph)
 library(pheatmap)
 library(ComplexHeatmap)
 library(circlize)
-library(Cairo)
 
-# Set custom theme for publication-quality figures
 theme_publication <- theme_minimal() +
   theme(
     text = element_text(size = 12, family = "sans"),
@@ -73,8 +69,7 @@ theme_publication <- theme_minimal() +
 
 theme_set(theme_publication)
 
-# Create results directory structure
-results_dir <- "../output"
+results_dir <- "./analysis/casestudy/results"
 plots_dir <- file.path(results_dir, "plots")
 tables_dir <- file.path(results_dir, "tables")
 
@@ -82,14 +77,14 @@ if (!dir.exists(results_dir)) dir.create(results_dir, recursive = TRUE)
 if (!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE)
 if (!dir.exists(tables_dir)) dir.create(tables_dir, recursive = TRUE)
 
-# Load and examine data
-seurat_subset_filt <- readRDS("PBMC.top600.RDS")
+seurat_subset_filt <- readRDS("./analysis/casestudy/PBMC.top600.RDS")
 
 # Data summary
 cat("Dataset Summary:\n")
 cat("Number of cells:", ncol(seurat_subset_filt), "\n")
 cat("Number of genes:", nrow(seurat_subset_filt), "\n")
-cat("Number of donors:", length(unique(seurat_subset_filt$donor_id)), "\n")
+cat("Number of donors:", length(unique(seurat_subset_filt$SAMPLE_ID)), "\n")
+
 ```
 
 # Methods
@@ -97,10 +92,9 @@ cat("Number of donors:", length(unique(seurat_subset_filt$donor_id)), "\n")
 ## Data Preprocessing
 
 ```{r data-split}
-# Split data by donor for robust network inference
 seurat_split <- SplitObject(
   object = seurat_subset_filt,
-  split.by = "donor_id"
+  split.by = "SAMPLE_ID"
 )
 
 cat("Data split into", length(seurat_split), "donor-specific datasets\n")
@@ -108,7 +102,6 @@ donor_summary <- sapply(seurat_split, ncol) %>%
   data.frame(Cells = .) %>%
   rownames_to_column("Donor")
 
-# Save table
 write.csv(donor_summary, file.path(tables_dir, "cells_per_donor.csv"), row.names = FALSE)
 
 knitr::kable(donor_summary, caption = "Cells per donor")
@@ -122,8 +115,7 @@ cat("Inferring networks using Joint Random Forest...\n")
 start_time <- Sys.time()
 
 jrf_mat <- infer_networks(seurat_split, 
-                          method = "JRF", 
-                          nCores = 15)
+                          method = "JRF")
 
 end_time <- Sys.time()
 cat("Network inference completed in", round(difftime(end_time, start_time, units = "mins"), 2), "minutes\n")
@@ -132,7 +124,6 @@ cat("Network inference completed in", round(difftime(end_time, start_time, units
 ## Network Processing and Consensus Generation
 
 ```{r network-processing}
-# Generate weighted adjacency matrices
 jrf_wadj <- generate_adjacency(jrf_mat)
 sjrf_wadj <- symmetrize(jrf_wadj, weight_function = "mean")
 
@@ -157,7 +148,6 @@ print(summary(edge_counts))
 ```
 
 ```{r consensus-network}
-# Create consensus network using voting approach
 consensus_net <- create_consensus(sjrf_adj, method = "vote")
 
 cat("Consensus network statistics:\n")
@@ -172,10 +162,8 @@ cat("Density:", round(sum(consensus_net > 0) / (nrow(consensus_net) * (nrow(cons
 ## Community Detection and Network Analysis
 
 ```{r community-detection, fig.width=16, fig.height=12}
-# Perform community detection and pathway analysis
 comm_results <- community_path(consensus_net)
 
-# Extract network components
 network_graph <- comm_results$graph
 membership <- comm_results$communities$membership
 
@@ -194,7 +182,6 @@ community_summary <- data.frame(
 ) %>%
   arrange(desc(Size))
 
-# Save community summary table
 write.csv(community_summary, file.path(tables_dir, "community_summary.csv"), row.names = FALSE)
 
 knitr::kable(head(community_summary, 10), 
@@ -204,22 +191,15 @@ knitr::kable(head(community_summary, 10),
 ## Publication-Quality Network Visualization
 
 ```{r network-viz, fig.width=14, fig.height=10}
-# Filter communities with at least 10 genes for visualization
-min_community_size <- 10
+ùmin_community_size <- 60
 large_communities <- community_sizes[community_sizes >= min_community_size]
 valid_communities <- as.integer(names(large_communities))
 
-# Remove specific communities if needed (adjust based on your analysis)
-#valid_communities <- valid_communities[!valid_communities %in% c(5, 6)]
-
-# Get vertices in valid communities
 valid_vertices <- names(membership)[membership %in% valid_communities]
 
-# Create subgraph and convert to tidygraph
 filtered_graph <- igraph::induced_subgraph(network_graph, vids = valid_vertices)
 tg <- as_tbl_graph(filtered_graph)
 
-# Add community information
 tg <- tg %>%
   mutate(
     community = factor(membership[name]),
@@ -227,8 +207,6 @@ tg <- tg %>%
     betweenness = igraph::betweenness(filtered_graph, normalized = TRUE)
   )
 
-library(igraph)
-# Create publication-quality network plot
 set.seed(1234)
 p1 <- ggraph(tg, layout = "fr", 
              niter = 3000,
@@ -259,9 +237,7 @@ p1 <- ggraph(tg, layout = "fr",
   )
 
 print(p1)
-ggsave(file.path(plots_dir, "network_communities.png"), p1,
-         width = 14, height = 10, dpi = 300, bg = "white", device = "png")
-# Save network plot
+
 ggsave(file.path(plots_dir, "network_communities.png"), p1, 
        width = 14, height = 10, dpi = 300, bg = "white")
 ggsave(file.path(plots_dir, "network_communities.pdf"), p1, 
@@ -271,7 +247,6 @@ ggsave(file.path(plots_dir, "network_communities.pdf"), p1,
 ## Network Topology Analysis
 
 ```{r network-topology, fig.width=12, fig.height=8}
-# Comprehensive network statistics
 network_stats <- list(
   nodes = vcount(filtered_graph),
   edges = ecount(filtered_graph),
@@ -292,12 +267,10 @@ stats_df <- data.frame(
             round(network_stats$modularity, 3))
 )
 
-# Save network topology metrics
 write.csv(stats_df, file.path(tables_dir, "network_topology_metrics.csv"), row.names = FALSE)
 
 knitr::kable(stats_df, caption = "Network topology metrics")
 
-# Degree distribution plot
 degree_data <- data.frame(
   gene = V(filtered_graph)$name,
   degree = degree(filtered_graph),
@@ -326,17 +299,14 @@ p3 <- ggplot(degree_data, aes(x = community, y = degree, fill = community)) +
   theme_publication +
   theme(legend.position = "none")
 
-# Combine plots
 combined_plot <- p2 / p3
 print(combined_plot)
 
-# Save degree distribution plots
 ggsave(file.path(plots_dir, "degree_distribution.png"), combined_plot, 
        width = 12, height = 8, dpi = 300, bg = "white")
 ggsave(file.path(plots_dir, "degree_distribution.pdf"), combined_plot, 
        width = 12, height = 8, bg = "white")
 
-# Save degree data
 write.csv(degree_data, file.path(tables_dir, "degree_data.csv"), row.names = FALSE)
 ```
 
@@ -344,11 +314,8 @@ write.csv(degree_data, file.path(tables_dir, "degree_data.csv"), row.names = FAL
 ## Functional Pathway Enrichment Analysis
 
 ```{r pathway-prep}
-# Extract pathway results for major communities
 selected_communities <- names(community_sizes[community_sizes >= min_community_size])
-selected_communities <- selected_communities[!selected_communities %in% c("5", "6")]
 
-# Combine pathway data with community information
 pathway_df <- bind_rows(
   lapply(selected_communities, function(comm) {
     if (!is.null(comm_results$pathways[[comm]]) && nrow(comm_results$pathways[[comm]]) > 0) {
@@ -361,7 +328,7 @@ pathway_df <- bind_rows(
   })
 )
 
-# Filter and prepare pathway data
+
 if (nrow(pathway_df) > 0) {
   pathway_df <- pathway_df %>%
     filter(p.adjust < 0.05) %>%
@@ -371,14 +338,12 @@ if (nrow(pathway_df) > 0) {
   cat("Total significant pathways:", nrow(pathway_df), "\n")
   cat("Communities with enriched pathways:", length(unique(pathway_df$Community)), "\n")
   
-  # Save pathway enrichment data
   write.csv(pathway_df, file.path(tables_dir, "pathway_enrichment.csv"), row.names = FALSE)
 }
 ```
 
 ```{r pathway-visualization, fig.width=14, fig.height=12}
 if (nrow(pathway_df) > 0) {
-  # Select top pathways per community for visualization
   top_pathways <- pathway_df %>%
     group_by(Community) %>%
     slice_min(p.adjust, n = 8) %>%
@@ -389,7 +354,6 @@ if (nrow(pathway_df) > 0) {
       Community = factor(Community, levels = paste0("Community ", sort(as.numeric(selected_communities))))
     )
   
-  # Enhanced bubble plot
   p4 <- ggplot(top_pathways, aes(x = Community, y = reorder(Description, log10_padj))) +
     geom_point(aes(size = Count, color = log10_padj), alpha = 0.8) +
     scale_color_viridis_c(name = "-log10(adj. p-value)", option = "plasma", direction = 1) +
@@ -400,9 +364,9 @@ if (nrow(pathway_df) > 0) {
       x = "Community",
       y = "KEGG Pathway"
     ) +
-    theme_minimal() +  # Use theme_minimal() instead of theme_publication
+    theme_minimal() +  
     theme(
-      text = element_text(size = 12),  # Remove family specification
+      text = element_text(size = 12),  
       axis.text.x = element_text(angle = 45, hjust = 1),
       axis.text.y = element_text(size = 9),
       legend.position = "right",
@@ -418,71 +382,18 @@ if (nrow(pathway_df) > 0) {
   
   print(p4)
   
-  # Save pathway enrichment plot
-  ggsave(file.path(plots_dir, "pathway_enrichment_bubble.png"), p4,
+ggsave(file.path(plots_dir, "pathway_enrichment_bubble.png"), p4,
          width = 14, height = 12, dpi = 300, bg = "white", device = "png", type = "cairo")
-  ggsave(file.path(plots_dir, "pathway_enrichment_bubble.pdf"), p4,
+ggsave(file.path(plots_dir, "pathway_enrichment_bubble.pdf"), p4,
          width = 14, height = 12, bg = "white", device = "pdf")
 
+write.csv(top_pathways, file.path(tables_dir, "top_pathways.csv"), row.names = FALSE)
   
-  # Save top pathways data
-  write.csv(top_pathways, file.path(tables_dir, "top_pathways.csv"), row.names = FALSE)
-  
-  # Pathway enrichment heatmap
-  if (length(unique(top_pathways$Community)) > 1) {
-    heatmap_data <- top_pathways %>%
-      select(Community, Description, log10_padj) %>%
-      pivot_wider(names_from = Community, values_from = log10_padj, values_fill = 0) %>%
-      column_to_rownames("Description") %>%
-      as.matrix()
-    
-    # Save heatmap data
-    write.csv(heatmap_data, file.path(tables_dir, "pathway_heatmap_data.csv"), row.names = TRUE)
-    
-    # Save heatmap as PNG
-    png(file.path(plots_dir, "pathway_enrichment_heatmap.png"), 
-        width = 12, height = 8, units = "in", res = 300)
-    p5 <- pheatmap(
-      heatmap_data,
-      color = viridis::plasma(50),
-      cluster_rows = TRUE,
-      cluster_cols = FALSE,
-      fontsize = 10,
-      fontsize_row = 8,
-      main = "Pathway Enrichment Heatmap",
-      angle_col = "45",
-      cellwidth = 30,
-      cellheight = 12
-    )
-    dev.off()
-    
-    # Save heatmap as PDF
-    pdf(file.path(plots_dir, "pathway_enrichment_heatmap.pdf"), 
-        width = 12, height = 8)
-    p5 <- pheatmap(
-      heatmap_data,
-      color = viridis::plasma(50),
-      cluster_rows = TRUE,
-      cluster_cols = FALSE,
-      fontsize = 10,
-      fontsize_row = 8,
-      main = "Pathway Enrichment Heatmap",
-      angle_col = "45",
-      cellwidth = 30,
-      cellheight = 12
-    )
-    dev.off()
-    
-    print(p5)
-  }
-  
-  # Top pathways table
   top_pathways_table <- top_pathways %>%
     select(Community, Description, Count, p.adjust) %>%
     arrange(Community, p.adjust) %>%
     mutate(p.adjust = scientific(p.adjust, digits = 3))
   
-  # Save top pathways table
   write.csv(top_pathways_table, file.path(tables_dir, "top_pathways_table.csv"), row.names = FALSE)
   
   knitr::kable(head(top_pathways_table, 20), 
@@ -497,10 +408,8 @@ if (nrow(pathway_df) > 0) {
 ## External Validation and Literature Support
 
 ```{r stringdb-validation, fig.width=12, fig.height=8}
-# Validate network edges against STRING database
 cat("Validating network edges against STRING database...\n")
 
-  # Then run your STRING code
 string_adj <- stringdb_adjacency(
     genes = rownames(consensus_net),
     species = 9606,
@@ -509,19 +418,16 @@ string_adj <- stringdb_adjacency(
   )
 
 
-# Process STRING adjacency matrix
 string_binary <- string_adj$binary
 string_binary <- string_binary[rownames(consensus_net), rownames(consensus_net)]
 string_adj_sym <- symmetrize(list(string_binary), weight_function = "mean")[[1]]
 
-# Calculate validation metrics
 our_edges <- which(consensus_net > 0, arr.ind = TRUE)
 our_edges <- our_edges[our_edges[,1] < our_edges[,2], ] # Upper triangle only
 
 string_edges <- which(string_adj_sym > 0, arr.ind = TRUE)
 string_edges <- string_edges[string_edges[,1] < string_edges[,2], ] # Upper triangle only
 
-# Edge overlap analysis
 our_edge_set <- paste(our_edges[,1], our_edges[,2], sep = "_")
 string_edge_set <- paste(string_edges[,1], string_edges[,2], sep = "_")
 
@@ -537,10 +443,8 @@ validation_metrics <- data.frame(
             round(precision, 3), round(recall, 3), round(f1_score, 3))
 )
 
-# Save validation metrics
 write.csv(validation_metrics, file.path(tables_dir, "validation_metrics.csv"), row.names = FALSE)
 
-# Visualization of validation
 validation_plot_data <- data.frame(
   Category = c("JRF Only", "STRING Only", "Both"),
   Count = c(length(our_edge_set) - overlap, 
@@ -562,25 +466,22 @@ p6 <- ggplot(validation_plot_data, aes(x = Category, y = Count, fill = Category)
 
 print(p6)
 
-# Save validation plot
 ggsave(file.path(plots_dir, "string_validation.png"), p6, 
        width = 12, height = 8, dpi = 300, bg = "white")
 ggsave(file.path(plots_dir, "string_validation.pdf"), p6, 
        width = 12, height = 8, bg = "white")
 
-# Save validation plot data
 write.csv(validation_plot_data, file.path(tables_dir, "validation_plot_data.csv"), row.names = FALSE)
 ```
 
 ## Literature Mining and Edge Support
 
 ```{r pubmed-mining}
-cat("Performing literature mining for edge validation...\n")
+cat("Performing literature 
+    mining for edge validation...\n")
 
-# Query PubMed for edge support
 pubmed_results <- edge_mining(list(consensus_net), string_adj_sym, query_edge_types = "FP")
 
-# Extract relevant communities
 target_communities <- as.numeric(selected_communities)
 community_genes <- lapply(target_communities, function(comm) {
   names(membership)[membership == comm]
@@ -590,26 +491,23 @@ names(community_genes) <- paste0("Community_", target_communities)
 if (length(pubmed_results) > 0 && !is.null(pubmed_results[[1]])) {
   query_df <- pubmed_results[[1]]
   
-  # Filter edges by community and literature support
   filtered_edges_by_community <- lapply(names(community_genes), function(name) {
     genes <- community_genes[[name]]
     edges <- query_df %>%
-      filter(gene1 %in% genes & gene2 %in% genes & pubmed_hits > 10) %>%
+      filter(gene1 %in% genes & gene2 %in% genes & pubmed_hits > 0) %>%
       arrange(desc(pubmed_hits))
     return(edges)
   })
   names(filtered_edges_by_community) <- names(community_genes)
   
-  # Summary of literature support
   literature_summary <- data.frame(
     Community = names(filtered_edges_by_community),
     Total_Edges = sapply(filtered_edges_by_community, nrow),
-    High_Support = sapply(filtered_edges_by_community, function(x) sum(x$pubmed_hits > 50)),
-    Medium_Support = sapply(filtered_edges_by_community, function(x) sum(x$pubmed_hits > 10 & x$pubmed_hits <= 50))
+    High_Support = sapply(filtered_edges_by_community, function(x) sum(x$pubmed_hits > 20)),
+    Medium_Support = sapply(filtered_edges_by_community, function(x) sum(x$pubmed_hits > 10 & x$pubmed_hits <= 20))
   ) %>%
     mutate(Percentage_Supported = round((High_Support + Medium_Support) / Total_Edges * 100, 1))
   
-  # Save literature summary
   write.csv(literature_summary, file.path(tables_dir, "literature_summary.csv"), row.names = FALSE)
   
   knitr::kable(literature_summary, 
@@ -617,7 +515,6 @@ if (length(pubmed_results) > 0 && !is.null(pubmed_results[[1]])) {
                col.names = c("Community", "Total Edges", "High Support (>50)", 
                            "Medium Support (10-50)", "% Supported"))
   
-  # Top supported edges per community
   if (any(literature_summary$Total_Edges > 0)) {
     top_supported_edges <- bind_rows(
       lapply(names(filtered_edges_by_community), function(comm) {
@@ -631,7 +528,6 @@ if (length(pubmed_results) > 0 && !is.null(pubmed_results[[1]])) {
     )
     
     if (nrow(top_supported_edges) > 0) {
-      # Save top supported edges
       write.csv(top_supported_edges, file.path(tables_dir, "top_supported_edges.csv"), row.names = FALSE)
       
       knitr::kable(top_supported_edges, 
@@ -645,12 +541,9 @@ if (length(pubmed_results) > 0 && !is.null(pubmed_results[[1]])) {
 }
 ```
 
-# Discussion and Conclusions
-
 ## Key Findings
 
 ```{r summary-statistics}
-# Generate comprehensive summary
 summary_results <- list(
   total_genes = nrow(consensus_net),
   total_edges = sum(consensus_net > 0) / 2,
@@ -679,10 +572,8 @@ if (exists("pathway_df") && nrow(pathway_df) > 0) {
   cat("- **Pathway enrichment:** ", nrow(pathway_df), "significant pathways identified\n")
 }
 
-write.table(as.data.frame(summary_results), "../output/results_cases.txt", col.names = T, row.names = F, sep = "\t", quote = F)
+write.table(as.data.frame(summary_results), "results_cases.txt", col.names = T, row.names = F, sep = "\t", quote = F)
 ```
-
-This analysis demonstrates the power of Joint Random Forest for inferring robust gene regulatory networks from single-cell data. The identified communities show strong functional coherence and are supported by literature evidence, providing valuable insights into PBMC gene regulation patterns.
 
 ## Session Information
 
