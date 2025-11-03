@@ -7,10 +7,11 @@ This repository contains a comprehensive analysis using the scGraphVerse package
 ```
 scGV_analysis/
 ├── R/                          # R scripts and analysis notebooks
-│   ├── PBMC.gtruth.Rmd        # Data generation and ground truth creation
-│   ├── case_study_JRF.Rmd     # Real data case study analysis
-│   ├── sim_scale_np.R         # Simulation study: scaling by nodes (n) and genes (p)
-│   └── sim_scale_K.R          # Simulation study: scaling by datasets (K)
+│   ├── gtruth_simulation.Rmd  # Data generation and ground truth creation
+│   ├── case_study.Rmd         # Real data case study analysis
+│   ├── first_scenario_modelb.R # Simulation: binary network inference methods
+│   ├── fsecond_scenario.R     # Simulation: scaling by nodes (n) and genes (p)
+│   └── third_scenario.R       # Simulation: scaling by datasets (K)
 ├── data/                       # Data storage
 │   ├── adjacency/             # Ground truth adjacency matrices
 │   ├── simdata/               # Simulated count matrices
@@ -25,7 +26,7 @@ scGV_analysis/
 
 The analysis follows a three-stage workflow:
 
-### 1. 📊 Data Generation (`PBMC.gtruth.Rmd`)
+### 1. 📊 Data Generation (`gtruth_simulation.Rmd`)
 **Purpose**: Generate ground truth networks and simulated data from real PBMC single-cell RNA-seq data.
 
 **What it does**:
@@ -48,11 +49,29 @@ The analysis follows a three-stage workflow:
 
 ### 2. 🧪 Simulation Studies
 
-#### 2.1 Node/Gene Scaling Study (`sim_scale_np.R`)
-**Purpose**: Evaluate network inference methods across different network sizes and sample sizes.
+#### 2.1 First Scenario: Binary Network Inference (`first_scenario_modelb.R`)
+**Purpose**: Evaluate binary network inference methods for inferring presence/absence of edges.
 
 **What it does**:
-- Tests multiple network inference methods:
+- Tests binary network inference methods:
+  - **PCzinb**: Partial correlation for zero-inflated negative binomial data
+  - **ZILGM**: Zero-inflated log-normal graphical model
+- Evaluates performance across:
+  - Different network sizes (p=100, 200, 500, 700 genes)
+  - Different sample sizes (n=100, 500 cells)
+- Calculates performance metrics:
+  - Precision, Recall, F1-score, MCC
+- Runs multiple iterations (default: 10) for statistical robustness
+
+**Key outputs**:
+- Summary results for binary methods (`data/results/binary_sim_n*p*_summary.txt`)
+- Detailed results for binary methods (`data/results/binary_sim_n*p*_detailed.txt`)
+
+#### 2.2 Second Scenario: Node/Gene Scaling Study (`fsecond_scenario.R`)
+**Purpose**: Evaluate weighted network inference methods across different network sizes and sample sizes.
+
+**What it does**:
+- Tests multiple weighted network inference methods:
   - **JRF (Joint Random Forest)**: Main method of interest
   - **GENIE3**: Random Forest
   - **GRNBoost2**: Gradient boosting method
@@ -67,19 +86,19 @@ The analysis follows a three-stage workflow:
 - Summary results (`data/results/sim_n*p*_summary.txt`)
 - Detailed results (`data/results/sim_n*p*_detailed.txt`)
 
-#### 2.2 Multiple dataset Scaling Study (`sim_scale_K.R`)
-**Purpose**: Evaluate how network inference performance increasing the number of datasets.
+#### 2.3 Third Scenario: Multiple Dataset Scaling Study (`third_scenario.R`)
+**Purpose**: Evaluate how network inference performance improves with increasing number of datasets.
 
 **What it does**:
 - Uses the K=5 simulated data
 - Progressively tests inference on subsets: K=1,2,3,4,5
-- Uses the same performance metrics as the scaling study
+- Uses the same performance metrics as the node/gene scaling study
 
 **Key outputs**:
 - K-progressive results (`data/results/sim_n*p*k*_summary.txt`)
 
-### 3. 🔬 Case Study Analysis (`case_study_JRF.Rmd`)
-**Purpose**: Apply the best method (JRF) to real PBMC data.
+### 3. 🔬 Case Study Analysis (`case_study.Rmd`)
+**Purpose**: Apply the Joint Random Forest (JRF) method to real PBMC data.
 
 **What it does**:
 - Loads processed PBMC data (B cells from multiple donors)

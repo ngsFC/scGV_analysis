@@ -88,46 +88,59 @@ run_k_progressive_study <- function(count_matrices_dir,
   
   # Helper function for single analysis
   run_single_method <- function(matrices, method, method_modules = NULL) {
+    # Convert list of matrices to MultiAssayExperiment
+    mae <- create_mae(matrices)
+
     timing <- system.time({
-      networks <- infer_networks(matrices, method = method, 
-                                 grnboost_modules = method_modules, 
+      networks <- infer_networks(mae, method = method,
+                                 grnboost_modules = method_modules,
                                  nCores = n_cores)
     })
-    
-    wadj <- generate_adjacency(networks)
-    sym_wadj <- symmetrize(wadj, weight_function = "mean")
-    binary_adj <- cutoff_adjacency(matrices, sym_wadj, n = 2, method = method, 
-                                   grnboost_modules = method_modules,
-                                   nCores = n_cores, 
-                                   quantile_threshold = quantile_threshold, 
-                                   debug = FALSE)
-    
-    scores <- pscores(adjm, binary_adj)$Statistics %>%
-      mutate(Method = method, 
+
+    # generate_adjacency and cutoff_adjacency return SummarizedExperiment
+    wadj_se <- generate_adjacency(networks)
+    sym_wadj_se <- symmetrize(wadj_se, weight_function = "mean")
+    binary_adj_se <- cutoff_adjacency(mae, sym_wadj_se, n = 2, method = method,
+                                      grnboost_modules = method_modules,
+                                      nCores = n_cores,
+                                      quantile_threshold = quantile_threshold,
+                                      debug = FALSE)
+
+    # Extract assays for pscores
+    binary_adj_list <- SummarizedExperiment::assays(binary_adj_se)
+
+    scores <- pscores(adjm, binary_adj_list)$Statistics %>%
+      mutate(Method = method,
              Time_seconds = timing["elapsed"],
              Time_minutes = timing["elapsed"] / 60)
-    
-    scores <- add_community_metrics(scores, binary_adj)
-    
-    return(list(scores = scores, binary_adj = binary_adj, sym_wadj = sym_wadj))
+
+    scores <- add_community_metrics(scores, binary_adj_list)
+
+    return(list(scores = scores, binary_adj = binary_adj_se, sym_wadj = sym_wadj_se))
   }
   
   # other helpers
-  create_consensus_scores <- function(binary_adj_list, sym_wadj_list, method_name, timing) {
-    consensus_vote <- create_consensus(binary_adj_list, method = "vote")
-    consensus_union <- create_consensus(binary_adj_list, method = "union")
-    consensus_inet <- create_consensus(binary_adj_list, sym_wadj_list, 
-                                       method = "INet", threshold = 0.05, ncores = n_cores)
-    
+  create_consensus_scores <- function(binary_adj_se, sym_wadj_se, method_name, timing) {
+    # create_consensus accepts SummarizedExperiment and returns SE, extract the matrix
+    consensus_vote_se <- create_consensus(binary_adj_se, method = "vote")
+    consensus_vote <- SummarizedExperiment::assays(consensus_vote_se)[[1]]
+
+    consensus_union_se <- create_consensus(binary_adj_se, method = "union")
+    consensus_union <- SummarizedExperiment::assays(consensus_union_se)[[1]]
+
+    consensus_inet_se <- create_consensus(binary_adj_se, sym_wadj_se,
+                                          method = "INet", threshold = 0.05, ncores = n_cores)
+    consensus_inet <- SummarizedExperiment::assays(consensus_inet_se)[[1]]
+
     scores <- pscores(adjm, list(consensus_vote, consensus_union, consensus_inet))$Statistics %>%
-      mutate(Method = method_name, 
+      mutate(Method = method_name,
              Predicted_Matrix = c("vote", "union", "inet"),
              Integration = "late",
              Time_seconds = timing["elapsed"],
              Time_minutes = timing["elapsed"] / 60)
-    
+
     scores <- add_community_metrics(scores, list(consensus_vote, consensus_union, consensus_inet))
-    
+
     return(scores)
   }
   
@@ -201,39 +214,44 @@ run_k_progressive_study <- function(count_matrices_dir,
       } else {
         # === K>1: All methods including multi-dataset strategies ===
         
-        # Prepare early matrix
-        early_matrix <- list(earlyj(current_matrices, rowg = TRUE))
-        
+        # Convert current_matrices to MultiAssayExperiment for API compatibility
+        current_mae <- create_mae(current_matrices)
+
+        # Prepare early matrix (earlyj takes MAE as input and returns MAE with merged data)
+        # Extract the merged experiment as a list for run_single_method
+        early_mae <- earlyj(current_mae, rowg = TRUE)
+        early_matrix <- as.list(MultiAssayExperiment::experiments(early_mae))
+
         # GENIE3 - Late integration
         timing_genie3_late <- system.time({
-          networks <- infer_networks(current_matrices, method = "GENIE3", nCores = n_cores)
+          networks <- infer_networks(current_mae, method = "GENIE3", nCores = n_cores)
         })
-        wadj <- generate_adjacency(networks)
-        sym_wadj <- symmetrize(wadj, weight_function = "mean")
-        binary_adj <- cutoff_adjacency(current_matrices, sym_wadj, n = 3, method = "GENIE3", 
-                                       nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
+        wadj_se <- generate_adjacency(networks)
+        sym_wadj_se <- symmetrize(wadj_se, weight_function = "mean")
+        binary_adj_se <- cutoff_adjacency(current_mae, sym_wadj_se, n = 3, method = "GENIE3",
+                                          nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
         
-        genie3_late_scores <- create_consensus_scores(binary_adj, sym_wadj, "GENIE3", timing_genie3_late)
+        genie3_late_scores <- create_consensus_scores(binary_adj_se, sym_wadj_se, "GENIE3", timing_genie3_late)
         all_scores <- bind_rows(all_scores, genie3_late_scores)
-        
+
         # GENIE3 - Early integration
         genie3_early_result <- run_single_method(early_matrix, "GENIE3")
         genie3_early_scores <- genie3_early_result$scores %>%
           mutate(Integration = "early", Predicted_Matrix = "early")
         all_scores <- bind_rows(all_scores, genie3_early_scores)
-        
+
         # GRNBoost2 - Late integration
         timing_grnboost_late <- system.time({
-          networks <- infer_networks(current_matrices, method = "GRNBoost2", 
+          networks <- infer_networks(current_mae, method = "GRNBoost2",
                                      grnboost_modules = modules, nCores = n_cores)
         })
-        wadj <- generate_adjacency(networks)
-        sym_wadj <- symmetrize(wadj, weight_function = "mean")
-        binary_adj <- cutoff_adjacency(current_matrices, sym_wadj, n = 3, method = "GRNBoost2", 
-                                       grnboost_modules = modules, nCores = n_cores, 
-                                       quantile_threshold = quantile_threshold, debug = FALSE)
-        
-        grnboost_late_scores <- create_consensus_scores(binary_adj, sym_wadj, "GRNBoost2", timing_grnboost_late)
+        wadj_se <- generate_adjacency(networks)
+        sym_wadj_se <- symmetrize(wadj_se, weight_function = "mean")
+        binary_adj_se <- cutoff_adjacency(current_mae, sym_wadj_se, n = 3, method = "GRNBoost2",
+                                          grnboost_modules = modules, nCores = n_cores,
+                                          quantile_threshold = quantile_threshold, debug = FALSE)
+
+        grnboost_late_scores <- create_consensus_scores(binary_adj_se, sym_wadj_se, "GRNBoost2", timing_grnboost_late)
         all_scores <- bind_rows(all_scores, grnboost_late_scores)
         
         # GRNBoost2 - Early integration
@@ -256,14 +274,14 @@ run_k_progressive_study <- function(count_matrices_dir,
         
         timing_jrf <- system.time({
           tryCatch({
-            networks <- infer_networks(current_matrices, method = "JRF", nCores = n_cores)
+            networks <- infer_networks(current_mae, method = "JRF", nCores = n_cores)
             if (!is.null(networks) && length(networks) > 0 && !is.null(networks[[1]])) {
-              wadj <- generate_adjacency(networks)
-              sym_wadj <- symmetrize(wadj, weight_function = "mean")
-              binary_adj <- cutoff_adjacency(current_matrices, sym_wadj, n = 3, method = "JRF", 
-                                             nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
-              
-              jrf_scores <- create_consensus_scores(binary_adj, sym_wadj, "JRF", timing_jrf) %>%
+              wadj_se <- generate_adjacency(networks)
+              sym_wadj_se <- symmetrize(wadj_se, weight_function = "mean")
+              binary_adj_se <- cutoff_adjacency(current_mae, sym_wadj_se, n = 3, method = "JRF",
+                                                nCores = n_cores, quantile_threshold = quantile_threshold, debug = FALSE)
+
+              jrf_scores <- create_consensus_scores(binary_adj_se, sym_wadj_se, "JRF", timing_jrf) %>%
                 mutate(Integration = "joint")
             }
           }, error = function(e) {

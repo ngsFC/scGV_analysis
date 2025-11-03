@@ -68,17 +68,24 @@ run_simulation_study <- function(adjm_file,
   count_step <- time_step("Loading count matrices", {
     readRDS(count_matrices_file)
   }, verbose)
-  count_matrices <- count_step$result
-  
-  # Prepare early integration matrix once
+  count_matrices_list <- count_step$result
+
+  # Convert to MultiAssayExperiment for compatibility with new API
+  mae_step <- time_step("Converting to MultiAssayExperiment", {
+    create_mae(count_matrices_list)
+  }, verbose)
+  count_matrices <- mae_step$result
+
+  # Prepare early integration matrix once (earlyj returns a MAE with merged data)
   early_step <- time_step("Preparing early integration matrix", {
-    list(earlyj(count_matrices, rowg = TRUE))
+    earlyj(count_matrices, rowg = TRUE)
   }, verbose)
   early_matrix <- early_step$result
   
   # Pre-calculate some metrics
   n_genes <- nrow(adjm)
-  n_cells <- ncol(count_matrices[[1]])
+  # Extract first experiment from MultiAssayExperiment to get dimensions
+  n_cells <- ncol(MultiAssayExperiment::experiments(count_matrices)[[1]])
   ratio <- n_genes / n_cells
   
   if (verbose) {
@@ -159,22 +166,22 @@ run_simulation_study <- function(adjm_file,
     
     # Helper function for processing late integration (GENIE3/GRNBoost2)
     process_late_integration <- function(networks, method_name, inet_thresh = inet_threshold_late) {
-      # Generate and symmetrize adjacency matrices
+      # Generate and symmetrize adjacency matrices (returns SummarizedExperiment)
       wadj_step <- time_step("Generating adjacency matrices", {
         generate_adjacency(networks)
       }, verbose)
-      wadj_list <- wadj_step$result
-      
+      wadj_se <- wadj_step$result
+
       sym_step <- time_step("Symmetrizing adjacency matrices", {
-        symmetrize(wadj_list, weight_function = "mean")
+        symmetrize(wadj_se, weight_function = "mean")
       }, verbose)
-      sym_wadj_list <- sym_step$result
-      
-      # Apply cutoff - WITH nCores for GENIE3/GRNBoost2
+      sym_wadj_se <- sym_step$result
+
+      # Apply cutoff - WITH nCores for GENIE3/GRNBoost2 (returns SummarizedExperiment)
       cutoff_step <- time_step("Applying cutoff with shuffled networks", {
         cutoff_adjacency(
           count_matrices = count_matrices,
-          weighted_adjm_list = sym_wadj_list,
+          weighted_adjm_list = sym_wadj_se,
           n = 3,
           method = method_name,
           nCores = n_cores,  # OK for GENIE3/GRNBoost2
@@ -183,30 +190,33 @@ run_simulation_study <- function(adjm_file,
           debug = FALSE
         )
       }, verbose)
-      binary_adj_list <- cutoff_step$result
-      
-      # Create consensus matrices
+      binary_adj_se <- cutoff_step$result
+
+      # Create consensus matrices (returns SummarizedExperiment, extract the matrix)
       vote_step <- time_step("Creating vote consensus", {
-        create_consensus(binary_adj_list, method = "vote")
+        consensus_se <- create_consensus(binary_adj_se, method = "vote")
+        SummarizedExperiment::assays(consensus_se)[[1]]
       }, verbose)
       consensus_vote <- vote_step$result
-      
+
       union_step <- time_step("Creating union consensus", {
-        create_consensus(binary_adj_list, method = "union")
+        consensus_se <- create_consensus(binary_adj_se, method = "union")
+        SummarizedExperiment::assays(consensus_se)[[1]]
       }, verbose)
       consensus_union <- union_step$result
-      
+
       inet_step <- time_step("Creating INet consensus", {
-        create_consensus(
-          adj_matrix_list = binary_adj_list,
-          weighted_list = sym_wadj_list,
+        consensus_se <- create_consensus(
+          adj_matrix_list = binary_adj_se,
+          weighted_list = sym_wadj_se,
           method = "INet",
           threshold = inet_thresh,
           ncores = n_cores
         )
+        SummarizedExperiment::assays(consensus_se)[[1]]
       }, verbose)
       consensus_inet <- inet_step$result
-      
+
       # Calculate scores
       pscores_step <- time_step("Calculating performance scores", {
         pscores(adjm, list(consensus_vote, consensus_union, consensus_inet))
@@ -239,22 +249,22 @@ run_simulation_study <- function(adjm_file,
     
     # Helper function for processing early integration (GENIE3/GRNBoost2)
     process_early_integration <- function(networks, method_name) {
-      # Generate and symmetrize adjacency matrices
+      # Generate and symmetrize adjacency matrices (returns SummarizedExperiment)
       wadj_step <- time_step("Generating adjacency matrices", {
         generate_adjacency(networks)
       }, verbose)
-      wadj_list <- wadj_step$result
-      
+      wadj_se <- wadj_step$result
+
       sym_step <- time_step("Symmetrizing adjacency matrices", {
-        symmetrize(wadj_list, weight_function = "mean")
+        symmetrize(wadj_se, weight_function = "mean")
       }, verbose)
-      sym_wadj_list <- sym_step$result
-      
-      # Apply cutoff - WITH nCores for GENIE3/GRNBoost2
+      sym_wadj_se <- sym_step$result
+
+      # Apply cutoff - WITH nCores for GENIE3/GRNBoost2 (returns SummarizedExperiment)
       cutoff_step <- time_step("Applying cutoff with shuffled networks", {
         cutoff_adjacency(
           count_matrices = early_matrix,
-          weighted_adjm_list = sym_wadj_list,
+          weighted_adjm_list = sym_wadj_se,
           n = 2,
           method = method_name,
           nCores = n_cores,  # OK for GENIE3/GRNBoost2
@@ -263,11 +273,14 @@ run_simulation_study <- function(adjm_file,
           debug = FALSE
         )
       }, verbose)
-      binary_adj_list <- cutoff_step$result
-      
+      binary_adj_se <- cutoff_step$result
+
+      # Extract first assay for pscores (early integration produces single matrix)
+      binary_adj_matrix <- SummarizedExperiment::assays(binary_adj_se)[[1]]
+
       # Calculate scores
       pscores_step <- time_step("Calculating performance scores", {
-        pscores(adjm, binary_adj_list)
+        pscores(adjm, list(binary_adj_matrix))
       }, verbose)
       scores <- pscores_step$result
       
@@ -281,7 +294,7 @@ run_simulation_study <- function(adjm_file,
       
       # Community detection
       comm_step <- time_step("Detecting communities for early integration", {
-        community_path(binary_adj_list[[1]], plot = FALSE, verbose = FALSE)
+        community_path(binary_adj_matrix, plot = FALSE, verbose = FALSE)
       }, verbose)
       communities <- comm_step$result
       
@@ -389,23 +402,23 @@ run_simulation_study <- function(adjm_file,
     timing_results[["JRF_joint"]] <- list(elapsed = jrf_inference_step$time)
     
     if (verbose) cat("  Processing JRF joint integration results...\n")
-    
-    # Process JRF results (joint integration)
+
+    # Process JRF results (joint integration) - returns SummarizedExperiment
     wadj_step <- time_step("Generating adjacency matrices", {
       generate_adjacency(jrf_networks)
     }, verbose)
-    wadj_list <- wadj_step$result
-    
+    wadj_se <- wadj_step$result
+
     sym_step <- time_step("Symmetrizing adjacency matrices", {
-      symmetrize(wadj_list, weight_function = "mean")
+      symmetrize(wadj_se, weight_function = "mean")
     }, verbose)
-    sym_wadj_list <- sym_step$result
-    
-    # Apply cutoff - WITHOUT nCores for JRF
+    sym_wadj_se <- sym_step$result
+
+    # Apply cutoff - WITHOUT nCores for JRF (returns SummarizedExperiment)
     cutoff_step <- time_step("Applying cutoff with shuffled networks", {
       cutoff_adjacency(
         count_matrices = count_matrices,
-        weighted_adjm_list = sym_wadj_list,
+        weighted_adjm_list = sym_wadj_se,
         n = 3,
         method = "JRF",
         # nCores = n_cores,  # REMOVED - JRF doesn't use this parameter
@@ -413,30 +426,33 @@ run_simulation_study <- function(adjm_file,
         debug = FALSE
       )
     }, verbose)
-    binary_adj_list <- cutoff_step$result
-    
-    # Create consensus matrices
+    binary_adj_se <- cutoff_step$result
+
+    # Create consensus matrices (returns SummarizedExperiment, extract the matrix)
     vote_step <- time_step("Creating vote consensus", {
-      create_consensus(binary_adj_list, method = "vote")
+      consensus_se <- create_consensus(binary_adj_se, method = "vote")
+      SummarizedExperiment::assays(consensus_se)[[1]]
     }, verbose)
     consensus_vote <- vote_step$result
-    
+
     union_step <- time_step("Creating union consensus", {
-      create_consensus(binary_adj_list, method = "union")
+      consensus_se <- create_consensus(binary_adj_se, method = "union")
+      SummarizedExperiment::assays(consensus_se)[[1]]
     }, verbose)
     consensus_union <- union_step$result
-    
+
     inet_step <- time_step("Creating INet consensus", {
-      create_consensus(
-        adj_matrix_list = binary_adj_list,
-        weighted_list = sym_wadj_list,
-        method = "INet", 
+      consensus_se <- create_consensus(
+        adj_matrix_list = binary_adj_se,
+        weighted_list = sym_wadj_se,
+        method = "INet",
         threshold = inet_threshold_jrf,
         ncores = n_cores  # INet consensus can still use cores
       )
+      SummarizedExperiment::assays(consensus_se)[[1]]
     }, verbose)
     consensus_inet <- inet_step$result
-    
+
     # Calculate scores
     pscores_step <- time_step("Calculating performance scores", {
       pscores(adjm, list(consensus_vote, consensus_union, consensus_inet))
