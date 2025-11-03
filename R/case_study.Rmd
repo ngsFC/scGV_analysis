@@ -29,11 +29,11 @@ knitr::opts_knit$set(root.dir = "~/Desktop/scGraphVerse/")
 
 # Abstract
 
-This analysis demonstrates the application of scGraphVerse package for inferring gene regulatory networks from scRNA-seq data of peripheral blood mononuclear cells (PBMCs). 
+This analysis demonstrates the application of scGraphVerse package for inferring gene networks from scRNA-seq data of peripheral blood mononuclear cells (PBMCs). 
 
 # Introduction
 
-Gene regulatory networks (GRNs) provide crucial insights into cellular function and disease mechanisms. scRNA-seq enables the reconstruction of these networks at unprecedented resolution. Here, we apply the Joint Random Forest (JRF) algorithm to infer robust GRNs from PBMC data.
+Gene networks (GRNs) provide crucial insights into cellular function and disease mechanisms. Here, we apply the Joint Random Forest (JRF) algorithm to infer robust GRNs from PBMC data.
 
 ## Load Libraries and Data
 

@@ -23,13 +23,6 @@ knitr::opts_knit$set(root.dir = "../data",
 ## Load Libraries
 
 ```{r load-libraries}
-
-#library(biomaRt)
-#library(DT)
-#library(tidyverse)
-#library(Seurat)
-#library(STRINGdb)
-
 library(scGraphVerse)
 library(igraph)
 library(ggraph)
@@ -49,11 +42,6 @@ seurat_object <- download_Atlas(seurat_url)
 table(seurat_object@meta.data$CELL_TYPE, seurat_object@meta.data$SAMPLE_ID)
 table(seurat_object@meta.data$SAMPLE_ID)
 table(seurat_object@meta.data$CELL_TYPE)
-
-#seurat_subset <- subset(
-#  x = seurat_object,
-#  subset = CELL_TYPE == "B_cell" & SAMPLE_ID %in% c("GSM4008638_Adult-Peripheral-Blood1_PBMC", "GSM4008641_Adult-Peripheral-Blood3-2_PBMC", #"GSM4008644_Adult-Peripheral-Blood4-3_PBMC")
-#)
 
 seurat_subset <- subset(
   x = seurat_object,

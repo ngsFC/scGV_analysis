@@ -572,6 +572,10 @@ run_simulation_study <- function(adjm_file,
   ))
 }
 
+
+# n=100
+# p=100
+
 results <- run_simulation_study(
   adjm_file = "../data/adjacency/adjm_p100.txt",
   count_matrices_file = "../data/simdata/sim_n100p100.RDS", 
@@ -580,16 +584,13 @@ results <- run_simulation_study(
   verbose = TRUE
 )
 
-# Access summary results
 summary_df <- results$summary
-
-# Access detailed results
 detailed_df <- results$detailed
 
-# Save results
 write.table(summary_df, "../data/results/sim_n100p100_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 write.table(detailed_df, "../data/results/sim_n100p100_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
+# p=200
 
 results <- run_simulation_study(
   adjm_file = "../data/adjacency/adjm_p200.txt",
@@ -599,15 +600,13 @@ results <- run_simulation_study(
   verbose = TRUE
 )
 
-# Access summary results
 summary_df <- results$summary
-
-# Access detailed results
 detailed_df <- results$detailed
 
-# Save results
 write.table(summary_df, "../data/results/sim_n100p200_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 write.table(detailed_df, "../data/results/sim_n100p200_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+# p=500
 
 results <- run_simulation_study(
   adjm_file = "../data/adjacency/adjm_p500.txt",
@@ -617,15 +616,13 @@ results <- run_simulation_study(
   verbose = TRUE
 )
 
-# Access summary results
 summary_df <- results$summary
-
-# Access detailed results
 detailed_df <- results$detailed
 
-# Save results
 write.table(summary_df, "../data/results/sim_n100p500_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 write.table(detailed_df, "../data/results/sim_n100p500_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+# p=700
 
 results <- run_simulation_study(
   adjm_file = "../data/adjacency/adjm_p700.txt",
@@ -635,17 +632,14 @@ results <- run_simulation_study(
   verbose = TRUE
 )
 
-# Access summary results
 summary_df <- results$summary
-
-# Access detailed results
 detailed_df <- results$detailed
 
-# Save results
 write.table(summary_df, "../data/results/sim_n100p700_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 write.table(detailed_df, "../data/results/sim_n100p700_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
-# 500
+# n=500
+# p=100
 
 results <- run_simulation_study(
   adjm_file = "../data/adjacency/adjm_p100.txt",
@@ -655,17 +649,13 @@ results <- run_simulation_study(
   verbose = TRUE
 )
 
-# Access summary results
 summary_df <- results$summary
-
-# Access detailed results
 detailed_df <- results$detailed
 
-# Save results
 write.table(summary_df, "../data/results/sim_n500p100_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 write.table(detailed_df, "../data/results/sim_n500p100_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
-
+# p=200
 
 results <- run_simulation_study(
   adjm_file = "../data/adjacency/adjm_p200.txt",
@@ -675,15 +665,13 @@ results <- run_simulation_study(
   verbose = TRUE
 )
 
-# Access summary results
 summary_df <- results$summary
-
-# Access detailed results
 detailed_df <- results$detailed
 
-# Save results
 write.table(summary_df, "../data/results/sim_n500p200_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 write.table(detailed_df, "../data/results/sim_n500p200_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+# p=500
 
 results <- run_simulation_study(
   adjm_file = "../data/adjacency/adjm_p500.txt",
@@ -693,15 +681,13 @@ results <- run_simulation_study(
   verbose = TRUE
 )
 
-# Access summary results
 summary_df <- results$summary
-
-# Access detailed results
 detailed_df <- results$detailed
 
-# Save results
 write.table(summary_df, "../data/results/sim_n500p500_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 write.table(detailed_df, "../data/results/sim_n500p500_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+# p=700
 
 results <- run_simulation_study(
   adjm_file = "../data/adjacency/adjm_p700.txt",
@@ -711,13 +697,9 @@ results <- run_simulation_study(
   verbose = TRUE
 )
 
-# Access summary results
 summary_df <- results$summary
-
-# Access detailed results
 detailed_df <- results$detailed
 
-# Save results
 write.table(summary_df, "../data/results/sim_n500p700_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 write.table(detailed_df, "../data/results/sim_n500p700_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 

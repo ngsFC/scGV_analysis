@@ -451,12 +451,11 @@ run_binary_simulation_study <- function(adjm_file,
   ))
 }
 
-# Run simulations for different scenarios
 
-# n=100 scenarios
+# p=100 scenarios
 results <- run_binary_simulation_study(
-  adjm_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/adjacency/adjm_p100.txt",
-  count_matrices_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/simdata/sim_n100p100.RDS",
+  adjm_file = "../data/adjacency/adjm_p100.txt",
+  count_matrices_file = "../data/simdata/sim_n100p100.RDS",
   n_runs = 10,
   n_cores = 15,
   verbose = TRUE,
@@ -466,46 +465,12 @@ results <- run_binary_simulation_study(
 # Save results
 summary_df <- results$summary
 detailed_df <- results$detailed
-write.table(summary_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_zilgm_n100p100_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
-write.table(detailed_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_zilgm_n100p100_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(summary_df, "../data/results/sim_zilgm_n100p100_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(detailed_df, "../data/results/sim_zilgm_n100p100_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
 results <- run_binary_simulation_study(
-  adjm_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/adjacency/adjm_p100.txt",
-  count_matrices_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/simdata/sim_n100p100.RDS",
-  n_runs = 2,
-  n_cores = 15,
-  verbose = TRUE,
-  methods = "PCzinb"
-)
-
-# Save results
-summary_df <- results$summary
-detailed_df <- results$detailed
-write.table(summary_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_pczinb_n100p100_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
-write.table(detailed_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_pczinb_n100p100_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
-
-
-
-
-
-results <- run_binary_simulation_study(
-  adjm_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/adjacency/adjm_p200.txt",
-  count_matrices_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/simdata/sim_n100p200.RDS",
-  n_runs = 10,
-  n_cores = 15,
-  verbose = TRUE,
-  methods = "ZILGM"
-)
-
-# Save results
-summary_df <- results$summary
-detailed_df <- results$detailed
-write.table(summary_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_zilgm_n100p200_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
-write.table(detailed_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_zilgm_n100p200_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
-
-results <- run_binary_simulation_study(
-  adjm_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/adjacency/adjm_p200.txt",
-  count_matrices_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/simdata/sim_n100p200.RDS",
+  adjm_file = "../data/adjacency/adjm_p100.txt",
+  count_matrices_file = "../data/simdata/sim_n100p100.RDS",
   n_runs = 10,
   n_cores = 15,
   verbose = TRUE,
@@ -515,15 +480,15 @@ results <- run_binary_simulation_study(
 # Save results
 summary_df <- results$summary
 detailed_df <- results$detailed
-write.table(summary_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_pczinb_n100p200_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
-write.table(detailed_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_pczinb_n100p200_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(summary_df, "../data/results/sim_pczinb_n100p100_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(detailed_df, "../data/results/sim_pczinb_n100p100_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
-
+# p=200 scenarios
 
 results <- run_binary_simulation_study(
-  adjm_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/adjacency/adjm_p500.txt",
-  count_matrices_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/simdata/sim_n100p500.RDS",
-  n_runs = 5,
+  adjm_file = "../data/adjacency/adjm_p200.txt",
+  count_matrices_file = "../data/simdata/sim_n100p200.RDS",
+  n_runs = 10,
   n_cores = 15,
   verbose = TRUE,
   methods = "ZILGM"
@@ -532,13 +497,13 @@ results <- run_binary_simulation_study(
 # Save results
 summary_df <- results$summary
 detailed_df <- results$detailed
-write.table(summary_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_zilgm_n100p500_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
-write.table(detailed_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_zilgm_n100p500_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(summary_df, "../data/results/sim_zilgm_n100p200_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(detailed_df, "../data/results/sim_zilgm_n100p200_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
 results <- run_binary_simulation_study(
-  adjm_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/adjacency/adjm_p500.txt",
-  count_matrices_file = "/home/francescoc/Desktop/network/graphwork/analysis/simulation/simdata/sim_n100p500.RDS",
-  n_runs = 5,
+  adjm_file = "../data/adjacency/adjm_p200.txt",
+  count_matrices_file = "../data/simdata/sim_n100p200.RDS",
+  n_runs = 10,
   n_cores = 15,
   verbose = TRUE,
   methods = "PCzinb"
@@ -547,5 +512,38 @@ results <- run_binary_simulation_study(
 # Save results
 summary_df <- results$summary
 detailed_df <- results$detailed
-write.table(summary_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_pczinb_n100p500_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
-write.table(detailed_df, "/home/francescoc/Desktop/network/graphwork/analysis/simulation/results/sim_pczinb_n100p500_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(summary_df, "../data/results/sim_pczinb_n100p200_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(detailed_df, "../data/results/sim_pczinb_n100p200_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+
+# p=500 scenarios
+
+results <- run_binary_simulation_study(
+  adjm_file = "../data/adjacency/adjm_p500.txt",
+  count_matrices_file = "../data/simdata/sim_n100p500.RDS",
+  n_runs = 10,
+  n_cores = 15,
+  verbose = TRUE,
+  methods = "ZILGM"
+)
+
+# Save results
+summary_df <- results$summary
+detailed_df <- results$detailed
+write.table(summary_df, "../data/results/sim_zilgm_n100p500_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(detailed_df, "../data/results/sim_zilgm_n100p500_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+results <- run_binary_simulation_study(
+  adjm_file = "../data/adjacency/adjm_p500.txt",
+  count_matrices_file = "../data/simdata/sim_n100p500.RDS",
+  n_runs = 10,
+  n_cores = 15,
+  verbose = TRUE,
+  methods = "PCzinb"
+)
+
+# Save results
+summary_df <- results$summary
+detailed_df <- results$detailed
+write.table(summary_df, "../data/results/sim_pczinb_n100p500_summary.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(detailed_df, "../data/results/sim_pczinb_n100p500_detailed.txt", sep = "\t", quote = FALSE, row.names = FALSE)
