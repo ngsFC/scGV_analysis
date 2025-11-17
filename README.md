@@ -7,11 +7,11 @@ This repository contains a comprehensive analysis using the scGraphVerse package
 ```
 scGV_analysis/
 ├── R/                          # R scripts and analysis notebooks
-│   ├── gtruth_simulation.Rmd  # Data generation and ground truth creation
+│   ├── gtruth_simulation.Rmd  # Simulation data generation and ground truth creation
 │   ├── case_study.Rmd         # Real data case study analysis
-│   ├── first_scenario_modelb.R # Simulation: binary network inference methods
-│   ├── fsecond_scenario.R     # Simulation: scaling by nodes (n) and genes (p)
-│   └── third_scenario.R       # Simulation: scaling by datasets (K)
+│   ├── first_scenario_modelb.R # Simulation: model-based and assumption-free inference methods
+│   ├── fsecond_scenario.R     # Simulation: assumption-free methods, scaling by cells (n) and genes (p) 
+│   └── third_scenario.R       # Simulation: assumption-free methods, scaling by datasets (K)
 ├── data/                       # Data storage
 │   ├── adjacency/             # Ground truth adjacency matrices
 │   ├── simdata/               # Simulated count matrices
@@ -49,37 +49,33 @@ The analysis follows a three-stage workflow:
 
 ### 2. 🧪 Simulation Studies
 
-#### 2.1 First Scenario: Binary Network Inference (`first_scenario_modelb.R`)
-**Purpose**: Evaluate binary network inference methods for inferring presence/absence of edges.
+#### 2.1 First Scenario: model-based and assumption-free inference methods (`first_scenario_modelb.R`)
+**Purpose**: Evaluate network inference methods for inferring presence/absence of edges.
 
 **What it does**:
 - Tests binary network inference methods:
-  - **PCzinb**: Partial correlation for zero-inflated negative binomial data
-  - **ZILGM**: Zero-inflated log-normal graphical model
+  - **PCzinb**
+  - **ZILGM**
 - Evaluates performance across:
-  - Different network sizes (p=100, 200, 500, 700 genes)
-  - Different sample sizes (n=100, 500 cells)
-- Calculates performance metrics:
-  - Precision, Recall, F1-score, MCC
+  - Different network sizes (p=100, 200, 500)
+  - Different sample sizes (n=100)
 - Runs multiple iterations (default: 10) for statistical robustness
 
 **Key outputs**:
 - Summary results for binary methods (`data/results/binary_sim_n*p*_summary.txt`)
 - Detailed results for binary methods (`data/results/binary_sim_n*p*_detailed.txt`)
 
-#### 2.2 Second Scenario: Node/Gene Scaling Study (`fsecond_scenario.R`)
-**Purpose**: Evaluate weighted network inference methods across different network sizes and sample sizes.
+#### 2.2 Second Scenario: , scaling by cells (n) and genes (p) (`fsecond_scenario.R`)
+**Purpose**: Evaluate network inference methods across different network sizes and sample sizes.
 
 **What it does**:
-- Tests multiple weighted network inference methods:
-  - **JRF (Joint Random Forest)**: Main method of interest
-  - **GENIE3**: Random Forest
-  - **GRNBoost2**: Gradient boosting method
+- Tests assumption-free network inference methods:
+  - **JRF (Joint Random Forest)**
+  - **GENIE3**
+  - **GRNBoost2**
 - Evaluates performance across:
   - Different network sizes (p=100, 200, 500, 700 genes)
   - Different sample sizes (n=100, 500 cells)
-- Calculates performance metrics:
-  - Precision, Recall, F1-score, MCC
 - Runs multiple iterations (default: 10) for statistical robustness
 
 **Key outputs**:
@@ -92,7 +88,7 @@ The analysis follows a three-stage workflow:
 **What it does**:
 - Uses the K=5 simulated data
 - Progressively tests inference on subsets: K=1,2,3,4,5
-- Uses the same performance metrics as the node/gene scaling study
+- Uses the same performance metrics as the cells/genes scaling study
 
 **Key outputs**:
 - K-progressive results (`data/results/sim_n*p*k*_summary.txt`)
@@ -121,13 +117,8 @@ The analysis follows a three-stage workflow:
 - Modify `n_cores` parameter in scripts (default: 15)
 - Reduce `n_runs` for faster execution (default: 10)
 
-**Testing different parameters**:
-- Network inference thresholds in simulation functions
-- Community detection parameters in case study
-- Pathway enrichment significance cutoffs
-
 **Support**:
-- Check scGraphVerse documentation
+- Check scGraphVerse documentation https://ngsfc.github.io/scGraphVerse/
 - File issues on the package GitHub repository
 
 ## License
