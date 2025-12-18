@@ -33,7 +33,7 @@ This analysis demonstrates the application of scGraphVerse package for inferring
 
 # Introduction
 
-Gene networks (GRNs) provide crucial insights into cellular function and disease mechanisms. Here, we apply the Joint Random Forest (JRF) algorithm to infer robust GRNs from PBMC data.
+Gene networks (GNs) provide crucial insights into cellular function and disease mechanisms. Here, we apply the Joint Random Forest (JRF) algorithm to infer robust GNs from PBMC data.
 
 ## Load Libraries and Data
 
@@ -77,8 +77,7 @@ if (!dir.exists(results_dir)) dir.create(results_dir, recursive = TRUE)
 if (!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE)
 if (!dir.exists(tables_dir)) dir.create(tables_dir, recursive = TRUE)
 
-#seurat_subset_filt <- readRDS("./analysis/casestudy/PBMC.top600.RDS")
-seurat_subset_filt <- readRDS("/home/francescoc/Desktop/network/graphwork/analysis/casestudy/PBMC.top600.RDS")
+seurat_subset_filt <- readRDS("./analysis/casestudy/PBMC.top600.RDS")
 
 # Data summary
 cat("Dataset Summary:\n")
@@ -603,7 +602,7 @@ top_interactions_custom <- lapply(c(3, 7, 9), function(comm) {
     dplyr::filter(Description %in% pathways_of_interest[[as.character(comm)]])
   
   if (nrow(selected_pathways) == 0) {
-    cat("⚠️  No matching pathways found for community", comm, "\n")
+    cat("No matching pathways found for community", comm, "\n")
     cat("Available pathways:\n")
     print(pathway_obj@result$Description)
     return(NULL)
@@ -637,7 +636,7 @@ top_interactions_custom <- lapply(c(3, 7, 9), function(comm) {
   cat("Interactions found:", nrow(pathway_interactions), "\n")
   
   if (nrow(pathway_interactions) == 0) {
-    cat("❌ No interactions with both genes. Trying with at least one gene...\n")
+    cat("No interactions with both genes. Trying with at least one gene...\n")
     
     housekeeping <- c("GAPDH", "ACTB", "ACTG1", "EEF1A1", "EEF2", "PPIA", 
                       "RACK1", "FTL", "PFN1", "TUBB", "TUBA1B")
