@@ -6,20 +6,22 @@ This repository contains a comprehensive analysis using the scGraphVerse package
 
 ```
 scGV_analysis/
-├── R/                          # R scripts and analysis notebooks
-│   ├── gtruth_simulation.Rmd  # Simulation data generation and ground truth creation
-│   ├── case_study.Rmd         # Real data case study analysis
-│   ├── first_scenario_modelb.R # Simulation: model-based and assumption-free inference methods
-│   ├── fsecond_scenario.R     # Simulation: assumption-free methods, scaling by cells (n) and genes (p) 
-│   └── third_scenario.R       # Simulation: assumption-free methods, scaling by datasets (K)
-├── data/                       # Data storage
-│   ├── adjacency/             # Ground truth adjacency matrices
-│   ├── simdata/               # Simulated count matrices
-│   ├── results/               # Simulation results
-│   └── PBMC.top600.RDS        # Processed PBMC data
-└── output/                     # Analysis outputs
-    ├── plots/                 # Generated plots and figures
-    └── tables/                # Results tables and summaries
+├── R/                              # R scripts and analysis notebooks
+│   ├── gtruth_simulation.Rmd      # Simulation data generation and ground truth creation
+│   ├── case_study.Rmd             # Case study 1: PBMC real data analysis
+│   ├── case_study2_late.Rmd       # Case study 2: Medulloblastoma — late integration
+│   ├── case_study2_early.Rmd      # Case study 2: Medulloblastoma — early integration + timing
+│   ├── first_scenario_modelb.R    # Simulation: model-based and assumption-free inference methods
+│   ├── fsecond_scenario.R         # Simulation: assumption-free methods, scaling by cells (n) and genes (p) 
+│   └── third_scenario.R           # Simulation: assumption-free methods, scaling by datasets (K)
+├── data/                           # Data storage
+│   ├── adjacency/                 # Ground truth adjacency matrices
+│   ├── simdata/                   # Simulated count matrices
+│   ├── results/                   # Simulation results
+│   └── PBMC.top600.RDS            # Processed PBMC data
+└── output/                         # Analysis outputs
+    ├── plots/                     # Generated plots and figures
+    └── tables/                    # Results tables and summaries
 ```
 
 ## Workflow Overview
@@ -93,7 +95,7 @@ The analysis follows a three-stage workflow:
 **Key outputs**:
 - K-progressive results (`data/results/sim_n*p*k*_summary.txt`)
 
-### 3. 🔬 Case Study Analysis (`case_study.Rmd`)
+### 3. 🔬 Case Study 1 — PBMC (`case_study.Rmd`)
 **Purpose**: Apply the Joint Random Forest (JRF) method to real PBMC data.
 
 **What it does**:
@@ -110,6 +112,46 @@ The analysis follows a three-stage workflow:
 - Pathway enrichment visualizations (`output/plots/pathway_enrichment_*.png`)
 - Summary tables (`output/tables/*.csv`)
 - Final results summary (`output/results_cases.txt`)
+
+### 4. 🧬 Case Study 2 — Medulloblastoma (`case_study2_late.Rmd` + `case_study2_early.Rmd`)
+
+**Purpose**: Apply GENIE3-based co-expression network inference to real pediatric medulloblastoma snRNA-seq data, comparing two integration strategies (late and early) and demonstrating scalability to 3,000 genes with biologically interpretable results.
+
+**Data source**: Two samples from the [Childhood Cancer Data Lab (SCPCA) portal](https://scpca.alexslemonade.org/), project **SCPCP000009**:
+- **SCPCS000136** — Female, 12 years, WHO grade 4, posterior fossa
+- **SCPCS000139** — Male, 14 years, WHO grade 4, posterior fossa
+
+Raw count matrices are used throughout. Seurat objects must be prepared in advance using the companion `create_seurat_objects.Rmd` script (not included here); place the resulting `seurat_SCPCS000136.rds` and `seurat_SCPCS000139.rds` in the same directory as the `.Rmd` files before knitting.
+
+#### 4.1 Late Integration (`case_study2_late.Rmd`)
+**What it does**:
+- Converts Ensembl IDs to HGNC symbols and selects the top 3,000 expressed genes with `selgene()` (MT, ribosomal, and MALAT1 genes excluded)
+- Runs GENIE3 independently on each sample via `create_mae()` + `infer_networks()`
+- Builds a consensus network by majority vote (`create_consensus(method = "vote")`): only edges present in both samples are retained
+- Performs Louvain community detection and KEGG pathway enrichment with `community_path()`
+- Saves per-sample inference times to `networks/inference_timing_late.csv` for use by the early integration script
+
+**Key outputs**:
+- `networks/consensus_se.rds`, `networks/consensus_network.rds`
+- `networks/inference_timing_late.csv`
+- `plots/consensus_network_plain.png`, `plots/consensus_network_communities.png`
+- `plots/consensus_pathway_enrichment.png`
+
+#### 4.2 Early Integration (`case_study2_early.Rmd`)
+**What it does**:
+- Pools both count matrices into a single matrix before inference (column-bind)
+- Runs a single GENIE3 inference on the pooled matrix
+- Binarises the adjacency matrix at the 99th percentile edge-weight quantile
+- Performs Louvain community detection and KEGG pathway enrichment
+- Imports late integration times from `networks/inference_timing_late.csv` and produces a direct timing comparison between the two strategies
+
+**Key outputs**:
+- `networks/early_binary_se.rds`, `networks/early_network.rds`
+- `plots/early_network_plain.png`, `plots/early_network_communities.png`
+- `plots/early_pathway_enrichment.png`
+- `plots/inference_time_comparison.png`
+
+> **Run order**: knit `case_study2_late.Rmd` first — it produces `inference_timing_late.csv` which is required by `case_study2_early.Rmd`.
 
 ### Customization
 

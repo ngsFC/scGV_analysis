@@ -1,0 +1,650 @@
+---
+title: "Medulloblastoma — Network (Early Integration)"
+subtitle: "SCPCS000136 + SCPCS000139 · GENIE3 single-cell inference · Cutoff & community analysis"
+author: |
+  **Francesco Cecere**
+  *Senior Bioinformatic Researcher*
+  AORN Santobono-Pausilipon
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    code_folding: hide
+    fig_width: 10
+    fig_height: 6
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo      = FALSE,
+  warning   = FALSE,
+  message   = FALSE,
+  fig.align = "center",
+  dpi       = 96
+)
+```
+
+```{r libraries, include=FALSE}
+library(Seurat)
+library(SingleCellExperiment)
+library(scGraphVerse)
+library(igraph)
+library(SummarizedExperiment)
+library(tidyverse)
+library(ggplot2)
+library(ggraph)
+library(tidygraph)
+library(ggrepel)
+library(RColorBrewer)
+library(viridis)
+library(visNetwork)
+library(DT)
+library(plotly)
+library(patchwork)
+library(downloadthis)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+
+set.seed(42)
+
+# ── Paths ──────────────────────────────────────────────────────────────────────
+# Set base_dir to the folder containing your Seurat RDS files.
+# Using "." means the current working directory (where this .Rmd lives).
+base_dir  <- "."
+net_dir   <- file.path(base_dir, "networks")
+plots_dir <- file.path(base_dir, "plots")
+
+dir.create(net_dir,   recursive = TRUE, showWarnings = FALSE)
+dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ── Parameters ────────────────────────────────────────────────────────────────
+n_genes            <- 3000   # top expressed genes (same universe as late integration)
+n_cores            <- 15     # GENIE3 threads — adjust to your machine
+quantile_threshold <- 0.99   # cutoff percentile for edge binarisation
+
+# ── Colour scheme ─────────────────────────────────────────────────────────────
+sample_colors <- c(
+  "SCPCS000136" = "#2196F3",
+  "SCPCS000139" = "#FF9800"
+)
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+dl_gg <- function(p, fname, w = 10, h = 7, label = "Download PNG (300 dpi)") {
+  path <- file.path(plots_dir, paste0(fname, ".png"))
+  suppressMessages(ggsave(path, plot = p, dpi = 300, width = w, height = h, bg = "white"))
+  downloadthis::download_file(path = path, output_name = fname,
+    button_label = label, button_type = "primary",
+    has_icon = TRUE, icon = "fa fa-download")
+}
+
+dt_table <- function(df, caption = NULL, pageLength = 15) {
+  DT::datatable(df, caption = caption, extensions = "Buttons",
+    filter = "top", rownames = FALSE,
+    options = list(dom = "Bfrtip", buttons = list("csv", "excel"),
+                   pageLength = pageLength, scrollX = TRUE, autoWidth = TRUE),
+    class = "compact hover stripe")
+}
+
+fmt_time <- function(secs) {
+  ifelse(secs < 60,
+         sprintf("%.1f seconds", secs),
+         sprintf("%.1f minutes", secs / 60))
+}
+```
+
+---
+
+# 1. Load Data
+
+> **Prerequisites:** This script expects two Seurat RDS files in `base_dir` and the
+> timing CSV produced by `04_network_late_integration_github.Rmd`:
+>
+> - `seurat_SCPCS000136.rds`
+> - `seurat_SCPCS000139.rds`
+> - `networks/inference_timing_late.csv` (created by script 04)
+>
+> The Seurat objects are produced by `create_seurat_objects.Rmd` starting from the
+> processed single-cell data available on the
+> [Childhood Cancer Data Lab (SCPCA) portal](https://scpca.alexslemonade.org/)
+> for samples **SCPCS000136** and **SCPCS000139** (project SCPCP000009,
+> Medulloblastoma, WHO grade 4). Raw count matrices are used throughout —
+> no normalisation is applied before network inference.
+
+The two per-sample Seurat objects are loaded here. No cell-type subsetting is applied — all cells from each sample are used. Raw count matrices are extracted for each sample separately before pooling.
+
+```{r load-data}
+seu_136 <- readRDS(file.path(base_dir, "seurat_SCPCS000136.rds"))
+seu_139 <- readRDS(file.path(base_dir, "seurat_SCPCS000139.rds"))
+
+mat_136 <- GetAssayData(JoinLayers(seu_136, assay = "RNA"), assay = "RNA", layer = "counts")
+mat_139 <- GetAssayData(JoinLayers(seu_139, assay = "RNA"), assay = "RNA", layer = "counts")
+
+cat(sprintf("SCPCS000136 : %d cells\n", ncol(mat_136)))
+cat(sprintf("SCPCS000139 : %d cells\n", ncol(mat_139)))
+```
+
+---
+
+# 2. Gene Selection & Early Integration
+
+Early integration differs fundamentally from the late integration approach in `04_network_late_integration_github.Rmd`. Here the two count matrices are **column-bound into a single matrix before any inference**, treating all cells as one pooled experiment. This increases the effective sample size available to GENIE3 and avoids any post-hoc consensus step — a single network is inferred directly from the full pool.
+
+Gene selection is performed identically to `04`: `selgene()` is called on the combined matrix to retain the top `r n_genes` expressed genes, with mitochondrial and ribosomal genes and MALAT1 excluded. Gene identifiers are converted from Ensembl IDs to HGNC symbols before selection, ensuring the same gene universe is used in both integration strategies for a fair comparison.
+
+```{r early-integration}
+# Convert ENSG IDs → gene symbols on the shared gene universe
+all_genes <- intersect(rownames(mat_136), rownames(mat_139))
+sym_map <- mapIds(org.Hs.eg.db, keys = all_genes,
+                  column = "SYMBOL", keytype = "ENSEMBL", multiVals = "first")
+sym_map <- sym_map[!is.na(sym_map)]
+
+mat_136_sym <- mat_136[names(sym_map), , drop = FALSE]
+mat_139_sym <- mat_139[names(sym_map), , drop = FALSE]
+rownames(mat_136_sym) <- sym_map
+rownames(mat_139_sym) <- sym_map
+
+# Pool and select genes on symbol-named matrices
+mat_combined <- cbind(mat_136_sym, mat_139_sym)
+mat_combined <- mat_combined[rownames(mat_combined) != "MALAT1", ]
+
+selected_genes <- selgene(as.matrix(mat_combined), top = n_genes,
+                           remove_mt = TRUE, remove_rib = TRUE)
+selected_genes <- intersect(selected_genes,
+                             intersect(rownames(mat_136_sym), rownames(mat_139_sym)))
+
+mat_early <- mat_combined[selected_genes, , drop = FALSE]
+
+cell_origin <- c(rep("SCPCS000136", ncol(mat_136_sym)),
+                 rep("SCPCS000139", ncol(mat_139_sym)))
+names(cell_origin) <- colnames(mat_early)
+
+cat(sprintf("ENSG IDs with symbol mapping : %d\n", length(sym_map)))
+cat(sprintf("Genes selected               : %d\n", nrow(mat_early)))
+cat(sprintf("Total cells                  : %d  (S136: %d + S139: %d)\n",
+            ncol(mat_early), ncol(mat_136_sym), ncol(mat_139_sym)))
+```
+
+---
+
+# 3. Network Inference with GENIE3
+
+A single GENIE3 run is performed on the pooled matrix. Because all `r ncol(mat_early)` cells are treated as one experiment, GENIE3 sees more observations per gene compared to the per-sample inference in `04`, potentially yielding a denser and more stable importance matrix. Runtime is captured with `system.time()`.
+
+```{r infer-network}
+mae <- create_mae(list("pooled" = as.matrix(mat_early)))
+
+set.seed(22172509)
+time_inference <- system.time({
+  networks <- infer_networks(
+    count_matrices_list = mae,
+    method              = "GENIE3",
+    nCores              = n_cores
+  )
+})
+
+elapsed <- time_inference[["elapsed"]]
+cat(sprintf("Inference completed in %s\n", fmt_time(elapsed)))
+```
+
+```{r timing-table}
+dt_table(
+  tibble(
+    Strategy     = "Early integration (pooled)",
+    `S136 cells` = ncol(mat_136),
+    `S139 cells` = ncol(mat_139),
+    `Total cells` = ncol(mat_early),
+    Genes        = nrow(mat_early),
+    Threads      = n_cores,
+    `Time (s)`   = round(elapsed, 1),
+    `Time (min)` = round(elapsed / 60, 2)
+  ),
+  caption = "GENIE3 inference runtime — early integration"
+)
+```
+
+---
+
+# 4. Adjacency, Symmetrisation & Cutoff
+
+The raw GENIE3 importance scores are converted to a symmetric weighted adjacency matrix, then binarised by applying a quantile-based cutoff. Only edges whose symmetrised weight exceeds the `r quantile_threshold * 100`th percentile of the full weight distribution are retained. The weight distribution before binarisation is shown together with the threshold line.
+
+```{r adjacency-pipeline}
+wadj_se   <- generate_adjacency(networks)
+swadj_se  <- symmetrize(wadj_se, weight_function = "mean")
+binary_se <- cutoff_adjacency(
+  count_matrices     = mae,
+  weighted_adjm_list = swadj_se,
+  n                  = 5,
+  method             = "GENIE3",
+  quantile_threshold = quantile_threshold,
+  nCores             = n_cores
+)
+
+adj_mat <- assay(binary_se)
+cat(sprintf("Binary adjacency: %d × %d  |  edges retained: %d\n",
+            nrow(adj_mat), ncol(adj_mat), sum(adj_mat) / 2))
+```
+
+## 4.1 Edge Weight Distribution
+
+The histogram shows all pairwise symmetrised GENIE3 importance scores. The vertical dashed line marks the `r quantile_threshold * 100`th percentile — scores to the right are kept as edges in the binary network.
+
+```{r cutoff-viz, fig.height=5}
+wadj_mat      <- assay(swadj_se)
+weights_vec   <- wadj_mat[upper.tri(wadj_mat, diag = FALSE)]
+threshold_val <- quantile(weights_vec, quantile_threshold)
+
+weight_df <- tibble(weight = weights_vec)
+
+p_cutoff <- ggplot(weight_df, aes(x = weight)) +
+  geom_histogram(bins = 80, fill = "#90CAF9", colour = "white", linewidth = 0.2) +
+  geom_vline(xintercept = threshold_val, colour = "#E53935",
+             linetype = "dashed", linewidth = 1) +
+  annotate("text",
+           x     = threshold_val, y = Inf,
+           label = sprintf("  q%.0f = %.4f", quantile_threshold * 100, threshold_val),
+           hjust = 0, vjust = 1.5, colour = "#E53935", size = 3.8, fontface = "bold") +
+  annotate("rect",
+           xmin = threshold_val, xmax = Inf, ymin = -Inf, ymax = Inf,
+           fill = "#E53935", alpha = 0.06) +
+  scale_x_continuous(labels = scales::scientific) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank()) +
+  labs(
+    title    = "Edge weight distribution — symmetrised GENIE3 scores (Early integration)",
+    subtitle = sprintf("Total pairs: %s  |  retained (> q%.0f): %s  (%.1f%%)",
+                       scales::comma(length(weights_vec)),
+                       quantile_threshold * 100,
+                       scales::comma(sum(weights_vec > threshold_val)),
+                       mean(weights_vec > threshold_val) * 100),
+    x = "Symmetrised importance score", y = "Count"
+  )
+
+ggplotly(p_cutoff)
+```
+
+```{r cutoff-viz-dl}
+dl_gg(p_cutoff, "early_cutoff_distribution", w = 10, h = 5)
+```
+
+## 4.2 Cutoff Summary
+
+```{r cutoff-summary-table}
+dt_table(
+  tibble(
+    Metric = c(
+      "Total gene pairs evaluated", "Cutoff threshold (quantile)",
+      "Threshold value", "Edges retained", "Edges discarded", "% retained"
+    ),
+    Value = c(
+      scales::comma(length(weights_vec)),
+      sprintf("q%.0f (%.0f%%)", quantile_threshold * 100, quantile_threshold * 100),
+      sprintf("%.6f", threshold_val),
+      scales::comma(sum(adj_mat) / 2),
+      scales::comma(sum(weights_vec > 0 & weights_vec <= threshold_val)),
+      sprintf("%.2f%%", mean(weights_vec > threshold_val) * 100)
+    )
+  ),
+  caption = "Edge cutoff summary", pageLength = 10
+)
+```
+
+---
+
+# 5. Build Network
+
+The binary adjacency matrix is converted directly to an igraph object — no consensus step is needed because early integration produces a single unified network. Isolated nodes are removed.
+
+```{r build-network}
+network_g <- graph_from_adjacency_matrix(adj_mat, mode = "undirected")
+network_g  <- simplify(network_g)
+isolated   <- which(degree(network_g) == 0)
+if (length(isolated) > 0) network_g <- delete_vertices(network_g, isolated)
+
+V(network_g)$degree      <- degree(network_g)
+V(network_g)$betweenness <- betweenness(network_g, normalized = TRUE)
+
+cat(sprintf("Network: %d nodes,  %d edges\n", vcount(network_g), ecount(network_g)))
+
+saveRDS(binary_se,  file.path(net_dir, "early_binary_se.rds"))
+saveRDS(network_g,  file.path(net_dir, "early_network.rds"))
+```
+
+## 5.1 Network Topology Statistics
+
+```{r topology-stats}
+deg_vals <- degree(network_g)
+
+topo_df <- tibble(
+  Metric = c(
+    "Nodes (genes)", "Edges", "Average degree", "Max degree", "Density",
+    "Average clustering coefficient", "Average shortest path length",
+    "Number of components", "Giant component size"
+  ),
+  Value = c(
+    vcount(network_g), ecount(network_g),
+    round(mean(deg_vals), 2), max(deg_vals),
+    round(graph.density(network_g), 5),
+    round(transitivity(network_g, type = "average"), 4),
+    round(mean_distance(network_g, directed = FALSE), 3),
+    components(network_g)$no,
+    max(components(network_g)$csize)
+  )
+)
+dt_table(topo_df, caption = "Global topology — early integration network", pageLength = 10)
+```
+
+## 5.2 Degree Distribution
+
+```{r degree-distribution, fig.height=5}
+deg_df <- tibble(gene = names(deg_vals), degree = as.integer(deg_vals))
+
+p_deg <- ggplot(deg_df, aes(x = degree)) +
+  geom_histogram(bins = 40, fill = "#2980b9", colour = "white", linewidth = 0.3) +
+  scale_x_continuous(breaks = scales::pretty_breaks(8)) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank()) +
+  labs(title = "Degree distribution — Early integration network",
+       x = "Degree", y = "Number of genes")
+
+ggplotly(p_deg)
+```
+
+```{r degree-dist-dl}
+dl_gg(p_deg, "early_degree_distribution", w = 9, h = 5)
+```
+
+---
+
+# 6. Network Visualisation
+
+## 6.1 Global Network Plot
+
+Force-directed layout (Fruchterman–Reingold). Node size and colour encode degree.
+
+```{r network-plain, fig.height=10, fig.width=12}
+set.seed(42)
+
+top_hubs <- deg_df %>% slice_max(degree, n = 30) %>% pull(gene)
+
+tidy_g <- as_tbl_graph(network_g) %>%
+  activate(nodes) %>%
+  mutate(
+    degree      = centrality_degree(),
+    betweenness = centrality_betweenness(normalized = TRUE)
+  )
+
+p_net <- ggraph(tidy_g, layout = "fr") +
+  geom_edge_link(colour = "#B0BEC5", alpha = 0.20, width = 0.30) +
+  geom_node_point(aes(size = degree, colour = degree), alpha = 0.85) +
+  scale_colour_viridis_c(option = "plasma", name = "Degree",
+                          guide = guide_colourbar(barwidth = 8, barheight = 0.5,
+                                                  title.position = "top")) +
+  scale_size_continuous(range = c(1.5, 9), name = "Degree",
+                         guide = guide_legend(override.aes = list(colour = "#2980b9"))) +
+  theme_graph(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.box      = "horizontal",
+    plot.title      = element_text(face = "bold", size = 14),
+    plot.subtitle   = element_text(size = 10, colour = "#555")
+  ) +
+  labs(
+    title    = "Medulloblastoma co-expression network — Early integration",
+    subtitle = sprintf("%d genes · %d edges · q%.0f cutoff",
+                       vcount(network_g), ecount(network_g), quantile_threshold * 100)
+  )
+
+p_net
+```
+
+```{r network-plain-dl}
+dl_gg(p_net, "early_network_plain", w = 14, h = 12)
+```
+
+---
+
+# 7. Community Detection
+
+Community detection is performed using **`scGraphVerse::community_path()`**, which takes `binary_se` directly as input. The Louvain algorithm assigns each gene to a community; **KEGG pathway enrichment** is run on communities with at least 5 genes.
+
+```{r community-detection}
+comm_result <- community_path(
+  adj_matrix  = binary_se,
+  methods     = "louvain",
+  pathway_db  = "KEGG",
+  organism    = "human",
+  genes_path  = 5,
+  plot        = TRUE,
+  verbose     = FALSE
+)
+
+builtin_plt <- recordPlot()
+png(file.path(plots_dir, "early_community_builtin.png"),
+    width = 12, height = 10, units = "in", res = 300, bg = "white")
+replayPlot(builtin_plt)
+invisible(dev.off())
+cat("Saved: early_community_builtin.png\n")
+
+memb        <- comm_result$communities$membership
+best_method <- comm_result$communities$best_method
+
+cat(sprintf("Algorithm   : %s\n", best_method))
+cat(sprintf("Communities : %d\n", length(unique(memb))))
+cat(sprintf("Modularity  : %.4f\n", modularity(comm_result$graph, memb)))
+
+comm_sizes <- sort(table(memb), decreasing = TRUE)
+comm_df <- tibble(
+  Community_id = names(comm_sizes),
+  `N genes`    = as.integer(comm_sizes)
+) %>%
+  mutate(
+    Rank  = row_number(),
+    Label = ifelse(Rank <= 3,
+                   paste0("Community ", Rank, " (n=", `N genes`, ")"),
+                   "Other")
+  )
+
+label_map <- setNames(comm_df$Label, comm_df$Community_id)
+
+V(network_g)$community  <- as.character(memb[V(network_g)$name])
+V(network_g)$comm_label <- label_map[V(network_g)$community]
+V(network_g)$comm_label[is.na(V(network_g)$comm_label)] <- "Other"
+
+dt_table(comm_df %>% dplyr::select(Rank, `Community ID` = Community_id, `N genes`, Label),
+         caption = "Community sizes (scGraphVerse community_path — Louvain)")
+```
+
+## 7.1 Network Coloured by Community
+
+```{r network-community, fig.height=11, fig.width=13}
+n_top      <- min(3, sum(comm_df$Rank <= 3))
+top_labels <- unique(comm_df$Label[comm_df$Rank <= 3])
+comm_pal   <- setNames(
+  RColorBrewer::brewer.pal(max(n_top, 3), "Set1")[seq_len(n_top)],
+  top_labels
+)
+
+tidy_comm <- as_tbl_graph(network_g) %>%
+  activate(nodes) %>%
+  mutate(
+    degree     = centrality_degree(),
+    comm_label = V(network_g)$comm_label
+  ) %>%
+  filter(comm_label != "Other")
+
+set.seed(42)
+p_comm <- ggraph(tidy_comm, layout = "fr") +
+  geom_edge_link(colour = "#ECEFF1", alpha = 0.25, width = 0.30) +
+  geom_node_point(aes(size = degree, colour = comm_label), alpha = 0.90) +
+  scale_colour_manual(values = comm_pal, name = "Community",
+                       guide = guide_legend(override.aes = list(size = 4), ncol = 2)) +
+  scale_size_continuous(range = c(1.5, 9), name = "Degree",
+                         guide = guide_legend(override.aes = list(colour = "#607D8B"))) +
+  theme_graph(base_size = 12) +
+  theme(
+    legend.position = "right",
+    plot.title      = element_text(face = "bold", size = 14),
+    plot.subtitle   = element_text(size = 10, colour = "#555")
+  ) +
+  labs(
+    title    = "Medulloblastoma network — communities (Early integration)",
+    subtitle = sprintf("%d communities · modularity = %.3f",
+                       length(unique(memb)), modularity(comm_result$graph, memb))
+  )
+
+p_comm
+```
+
+```{r network-community-dl}
+dl_gg(p_comm, "early_network_communities", w = 16, h = 12)
+```
+
+## 7.2 KEGG Pathway Enrichment per Community
+
+```{r pathway-enrichment-table}
+path_df <- imap_dfr(comm_result$pathways, function(res, comm_id) {
+  if (is.null(res) || nrow(as.data.frame(res)) == 0) return(NULL)
+  as.data.frame(res) %>%
+    as_tibble() %>%
+    mutate(Community = label_map[comm_id]) %>%
+    dplyr::select(Community, ID, Description, GeneRatio, BgRatio,
+           pvalue, p.adjust, qvalue, geneID, Count)
+}) %>%
+  filter(p.adjust < 0.05) %>%
+  arrange(Community, p.adjust)
+
+if (nrow(path_df) > 0) {
+  dt_table(path_df %>% dplyr::select(-geneID),
+           caption = "KEGG pathway enrichment — significant terms per community (adj. p < 0.05)")
+} else {
+  cat("No significant KEGG terms found at adj. p < 0.05.\n")
+}
+```
+
+```{r pathway-enrichment-dotplot, fig.height=9, fig.width=13}
+if (nrow(path_df) > 0) {
+  p_pathway <- path_df %>%
+    group_by(Community) %>%
+    slice_min(p.adjust, n = 3, with_ties = FALSE) %>%
+    ungroup() %>%
+    mutate(
+      GeneRatio_num = map_dbl(GeneRatio, ~ eval(parse(text = .x))),
+      Description   = str_trunc(Description, 45)
+    ) %>%
+    ggplot(aes(x = GeneRatio_num,
+               y = reorder(Description, GeneRatio_num),
+               colour = p.adjust, size = Count)) +
+    geom_point() +
+    facet_wrap(~ Community, scales = "free_y", ncol = 2) +
+    scale_colour_gradient(low = "#E53935", high = "#90CAF9", name = "adj. p-value") +
+    scale_size_continuous(name = "Gene count", range = c(2, 8)) +
+    theme_minimal(base_size = 11) +
+    theme(
+      strip.text       = element_text(face = "bold", size = 9),
+      axis.text.y      = element_text(size = 8),
+      panel.grid.minor = element_blank()
+    ) +
+    labs(title    = "KEGG pathway enrichment — top 3 terms per community (Early integration)",
+         subtitle = "Dot size = gene count · Colour = adjusted p-value",
+         x = "Gene Ratio", y = NULL)
+
+  ggplotly(p_pathway)
+  ggsave(file.path(plots_dir, "early_pathway_enrichment.png"),
+         plot = p_pathway, dpi = 300, width = 14, height = 10, bg = "white")
+  cat("Saved: early_pathway_enrichment.png\n")
+} else {
+  cat("No significant pathways to plot.\n")
+}
+```
+
+## 7.3 Top Hub Genes per Community
+
+```{r community-hubs-table}
+hub_per_comm <- tidy_comm %>%
+  activate(nodes) %>%
+  as_tibble() %>%
+  filter(comm_label != "Other") %>%
+  group_by(comm_label) %>%
+  slice_max(degree, n = 10, with_ties = FALSE) %>%
+  ungroup() %>%
+  dplyr::select(Community = comm_label, Gene = name, Degree = degree) %>%
+  arrange(Community, desc(Degree))
+
+dt_table(hub_per_comm, caption = "Top 10 hub genes per community")
+```
+
+---
+
+# 8. Inference Time Comparison
+
+The cumulative GENIE3 time from the late integration strategy (sum of both per-sample runs, as recorded in `04_network_late_integration_github.Rmd`) is compared against the single pooled inference of the early integration strategy. Only two bars are shown — one for each strategy — so the comparison reflects the total wall-clock cost of each approach.
+
+```{r timing-comparison}
+timing_late <- read_csv(file.path(net_dir, "inference_timing_late.csv"),
+                         show_col_types = FALSE)
+
+total_late_s <- sum(timing_late$time_s)
+
+timing_compare <- tibble(
+  strategy = factor(
+    c("Late integration", "Early integration"),
+    levels = c("Late integration", "Early integration")
+  ),
+  time_s   = c(total_late_s, elapsed),
+  time_min = round(c(total_late_s, elapsed) / 60, 2)
+)
+
+speedup <- round(total_late_s / elapsed, 1)
+
+dt_table(
+  timing_compare %>%
+    mutate(strategy = gsub("\n", " ", as.character(strategy))) %>%
+    dplyr::select(Strategy = strategy, `Time (s)` = time_s, `Time (min)` = time_min),
+  caption = "GENIE3 total inference time — Late vs Early integration"
+)
+```
+
+```{r timing-comparison-plot, fig.height=6, fig.width=7}
+p_timing <- ggplot(timing_compare, aes(x = strategy, y = time_min, fill = strategy)) +
+  geom_col(width = 0.55, colour = "black", linewidth = 0.5) +
+  geom_text(
+    aes(label = paste0(fmt_time(time_s), "\n(", time_min, " min)")),
+    vjust = -0.3, size = 3.2, fontface = "bold", colour = "#1a252f"
+  ) +
+  scale_fill_manual(
+    values = c("Late integration" = "grey", "Early integration" = "grey"),
+    guide  = "none"
+  ) +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.28)),
+    labels = scales::label_number(suffix = " min")
+  ) +
+  theme_minimal(base_size = 8) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor   = element_blank(),
+    axis.text.x        = element_text(size = 8, face = "bold", lineheight = 1.2)
+  ) +
+  labs(
+    title    = "GENIE3 inference time — Late vs Early integration",
+    subtitle = sprintf("%d genes · %d threads", nrow(mat_early), n_cores),
+    x        = NULL,
+    y        = "Total inference time (minutes)"
+  )
+
+ggplotly(p_timing)
+```
+
+```{r timing-comparison-save}
+ggsave(file.path(plots_dir, "inference_time_comparison.png"),
+       plot = p_timing, dpi = 300, width = 4, height = 6, bg = "white")
+cat("Saved: inference_time_comparison.png\n")
+```
